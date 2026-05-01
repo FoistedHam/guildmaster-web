@@ -119,6 +119,7 @@ const GameState = {
 		this.event_log = [];
 		this.active_sector = "travel";
 		SectorEventManager.reset();
+		ThreatManager.reset();
 		this.log_event("CYCLE", `Guildmaster ${this.guildmaster_name} assumes command.`, "info");
 	},
 
@@ -129,9 +130,10 @@ const GameState = {
 			const r = this.resources[key];
 			r.value = Math.max(0, r.value + r.delta);
 		}
-		SectorEventManager.reset();
-		ThreatManager.reset();
-		this.log_event("CYCLE", `Guildmaster ${this.guildmaster_name} assumes command.`, "info");
+		SectorEventManager.tick();
+		ThreatManager.tick();
+		this.log_event("CYCLE", `Cycle ${this.cycle} begins.`, "info");
+		this._check_loss();
 	},
 
 	_check_loss() {
@@ -220,6 +222,7 @@ const GameState = {
 		return "CRITICAL";
 	},
 };
+
 // ============================================================
 // THREAT MANAGER
 // ============================================================
@@ -274,28 +277,22 @@ const ThreatManager = {
 	},
 
 	tick() {
-		// Apply ongoing damage from active threats
 		for (const t of this.active_threats) {
 			GameState.apply_effects(t.tick_effects);
 		}
-		// Roll for new threat
 		this.roll_spawn();
 	},
 
 	roll_spawn() {
 		const max_threats = GameState.cycle < 15 ? 1 : (GameState.cycle < 35 ? 2 : 3);
 		if (this.active_threats.length >= max_threats) return;
-
 		const spawn_chance = 0.1 + (GameState.threat_level * 0.3);
 		if (Math.random() > spawn_chance) return;
-
-		// Pick a random threat type not already active
 		const active_ids = this.active_threats.map(t => t.id);
 		const available = Object.values(this.THREAT_TYPES).filter(t => !active_ids.includes(t.id));
 		if (available.length === 0) return;
-
 		const type = available[Math.floor(Math.random() * available.length)];
-		this.active_threats.push({ ...type });
+		this.active_threats.push(JSON.parse(JSON.stringify(type)));
 		GameState.log_event("THREAT", `${type.name} detected.`, "warning");
 	},
 
@@ -304,8 +301,6 @@ const ThreatManager = {
 		if (!threat) return;
 		const response = threat.responses[response_index];
 		if (!response) return;
-
-		// Check affordability
 		for (const key in response.cost) {
 			if (response.cost[key] < 0 && GameState.resources[key]) {
 				if (GameState.get_resource(key) < Math.abs(response.cost[key])) {
@@ -314,9 +309,7 @@ const ThreatManager = {
 				}
 			}
 		}
-
 		GameState.apply_effects(response.cost);
-
 		if (Math.random() <= response.success_chance) {
 			GameState.log_event("THREAT", `${threat.name} resolved with ${response.label}.`, "info");
 			this.active_threats.splice(threat_index, 1);
@@ -329,6 +322,7 @@ const ThreatManager = {
 		this.active_threats = [];
 	},
 };
+
 // ============================================================
 // SECTOR EVENT MANAGER
 // ============================================================
@@ -719,7 +713,6 @@ function refresh_content() {
 
 	content.innerHTML = html;
 
-	// Wire up event buttons
 	content.querySelectorAll(".event-btn").forEach(btn => {
 		if (btn.disabled) return;
 		btn.addEventListener("click", () => on_sector_event(btn.dataset.event));
@@ -749,7 +742,6 @@ function refresh_advance_btn() {
 	}
 }
 
-function refresh_all() {
 function refresh_threats() {
 	const panel = document.getElementById("threat-panel");
 	if (!panel) return;
@@ -782,6 +774,15 @@ function refresh_threats() {
 		});
 	});
 }
+
+function refresh_all() {
+	refresh_header();
+	refresh_resources();
+	refresh_log();
+	refresh_content();
+	refresh_sector_nav();
+	refresh_advance_btn();
+	refresh_threats();
 }
 
 // ============================================================
