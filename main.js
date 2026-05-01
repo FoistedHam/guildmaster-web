@@ -222,7 +222,302 @@ const GameState = {
 		return "CRITICAL";
 	},
 };
+// ============================================================
+// PERIL MANAGER
+// ============================================================
+const PerilManager = {
+	active_perils: [],
+	cooldowns: {},
 
+	PERILS: {
+		pirate_raid: {
+			id: "pirate_raid", category: "combat", sector: "security_intel",
+			title: "PIRATE RAID INCOMING",
+			desc: "A corsair vessel has locked onto your outer docking ring. They demand tribute or they will breach the hull.",
+			timer: 2, cooldown: 8,
+			choices: [
+				{ label: "SAFE", text: "Pay the tribute.", cost_desc: "25,000 CR",
+				  cost: { credits: -25000 }, effects: { credits: -25000 },
+				  result: "Tribute paid. The corsair withdraws." },
+				{ label: "MODERATE", text: "Scramble defenses. Repel them.", cost_desc: "1,500 munitions — 60%",
+				  cost: { munitions: -1500 }, effects: { munitions: -1500 }, success_chance: 0.6,
+				  success_effects: { threat_level: -0.05 },
+				  fail_effects: { station_hull: -0.15, crew_total: -200 },
+				  result: "Defense successful. Corsair driven off.",
+				  result_fail: "Defense failed. Hull damage. Casualties." },
+				{ label: "RISKY", text: "Ignore them. Hope they bluff.", cost_desc: "Free — 30%",
+				  cost: {}, effects: {}, success_chance: 0.3,
+				  success_effects: {}, fail_effects: { station_hull: -0.25, crew_total: -500, morale: -0.1 },
+				  result: "They were bluffing. Lucky.",
+				  result_fail: "Severe hull damage. Mass casualties." },
+			],
+		},
+		hull_breach: {
+			id: "hull_breach", category: "combat", sector: "engineering",
+			title: "HULL BREACH — SECTOR 7",
+			desc: "Catastrophic decompression in Sector 7. Bulkheads holding but failing. Crew evacuating.",
+			timer: 2, cooldown: 10,
+			choices: [
+				{ label: "SAFE", text: "Emergency seal. Full repair.", cost_desc: "800 parts + 12,000 CR",
+				  cost: { parts: -800, credits: -12000 }, effects: { parts: -800, credits: -12000 },
+				  result: "Breach sealed. Hull restored." },
+				{ label: "MODERATE", text: "Partial seal. Repair later.", cost_desc: "300 parts",
+				  cost: { parts: -300 }, effects: { parts: -300, hull_integrity: -0.05 },
+				  result: "Breach contained. Integrity compromised." },
+				{ label: "RISKY", text: "Sacrifice the sector. Seal it permanently.", cost_desc: "800 crew lost",
+				  cost: {}, effects: { crew_total: -800, morale: -0.12 },
+				  result: "Sector sealed. Crew inside lost. Station intact." },
+			],
+		},
+		assassination_attempt: {
+			id: "assassination_attempt", category: "gm", sector: "security_intel",
+			title: "ASSASSINATION ATTEMPT",
+			desc: "An operative was intercepted near your quarters. The weapon was Guild-issue.",
+			timer: 1, cooldown: 15,
+			choices: [
+				{ label: "SAFE", text: "Increase security. Full lockdown.", cost_desc: "20,000 CR",
+				  cost: { credits: -20000 }, effects: { credits: -20000, gm_personal_threat: -0.2 },
+				  result: "Security tightened. Threat reduced." },
+				{ label: "MODERATE", text: "Internal investigation.", cost_desc: "10,000 CR — 65%",
+				  cost: { credits: -10000 }, effects: { credits: -10000 }, success_chance: 0.65,
+				  success_effects: { gm_personal_threat: -0.3, gm_political_heat: -0.1 },
+				  fail_effects: { gm_personal_threat: 0.1 },
+				  result: "Plot uncovered. Conspirators arrested.",
+				  result_fail: "Investigation found nothing." },
+				{ label: "RISKY", text: "Publicly accuse a rival faction.", cost_desc: "Political risk",
+				  cost: {}, effects: { gm_political_heat: 0.2 }, success_chance: 0.5,
+				  success_effects: { gm_personal_threat: -0.25 },
+				  fail_effects: { gm_political_heat: 0.15, gm_personal_threat: 0.1 },
+				  result: "Accusation landed. Threat reduced.",
+				  result_fail: "Accusation backfired." },
+			],
+		},
+		guild_tribunal: {
+			id: "guild_tribunal", category: "gm", sector: "politics_info",
+			title: "GUILD TRIBUNAL SUMMONED",
+			desc: "Guild Central has issued a formal summons regarding alleged misuse of resources.",
+			timer: 3, cooldown: 20,
+			choices: [
+				{ label: "SAFE", text: "Comply fully.", cost_desc: "30,000 CR",
+				  cost: { credits: -30000 }, effects: { credits: -30000, gm_political_heat: -0.25 },
+				  result: "Tribunal satisfied. Heat reduced." },
+				{ label: "MODERATE", text: "Negotiate concessions.", cost_desc: "15,000 CR — 60%",
+				  cost: { credits: -15000 }, effects: { credits: -15000, gm_political_heat: -0.1 },
+				  success_chance: 0.6, success_effects: { gm_political_heat: -0.15 },
+				  fail_effects: { gm_political_heat: 0.1 },
+				  result: "Negotiation successful.",
+				  result_fail: "Negotiations collapsed." },
+				{ label: "RISKY", text: "Refuse summons. Declare autonomy.", cost_desc: "Extreme risk",
+				  cost: {}, effects: { gm_political_heat: 0.3 }, success_chance: 0.35,
+				  success_effects: { morale: 0.08 },
+				  fail_effects: { gm_political_heat: 0.2, gm_personal_threat: 0.2 },
+				  result: "Autonomy holds. Crew inspired.",
+				  result_fail: "Refusal escalated." },
+			],
+		},
+		labor_strike: {
+			id: "labor_strike", category: "story", sector: "labor_affairs",
+			title: "GENERAL LABOR STRIKE",
+			desc: "Union Councils have called a general strike. Productivity drops every cycle this continues.",
+			timer: 4, cooldown: 10,
+			choices: [
+				{ label: "SAFE", text: "Meet union demands.", cost_desc: "25,000 CR + 4,000 food",
+				  cost: { credits: -25000, food: -4000 },
+				  effects: { credits: -25000, food: -4000, morale: 0.12 },
+				  result: "Demands met. Strike ends." },
+				{ label: "MODERATE", text: "Partial concessions.", cost_desc: "12,000 CR — 70%",
+				  cost: { credits: -12000 }, effects: { credits: -12000 }, success_chance: 0.7,
+				  success_effects: { morale: 0.05 },
+				  fail_effects: { morale: -0.08, crew_total: -400 },
+				  result: "Negotiation worked.",
+				  result_fail: "Strike continues. Workers walking out." },
+				{ label: "RISKY", text: "Declare martial law.", cost_desc: "Severe consequences",
+				  cost: {}, effects: { morale: -0.2, gm_political_heat: 0.15, threat_level: 0.1 },
+				  result: "Martial law declared. Work resumes at gunpoint." },
+			],
+		},
+		power_grid_failure: {
+			id: "power_grid_failure", category: "sector", sector: "engineering",
+			title: "POWER GRID FAILURE",
+			desc: "Main power has failed in three sectors. Life support on backup.",
+			timer: 2, cooldown: 8,
+			choices: [
+				{ label: "SAFE", text: "Full grid restoration.", cost_desc: "600 parts + 10,000 CR",
+				  cost: { parts: -600, credits: -10000 }, effects: { parts: -600, credits: -10000 },
+				  result: "Grid restored. Systems nominal." },
+				{ label: "MODERATE", text: "Reroute power.", cost_desc: "200 parts",
+				  cost: { parts: -200 }, effects: { parts: -200, morale: -0.05 },
+				  result: "Power rerouted. Some sectors offline." },
+				{ label: "RISKY", text: "Cannibalize backups.", cost_desc: "Future fragility",
+				  cost: {}, effects: { hull_integrity: -0.1 },
+				  result: "Grid restored. Station more fragile." },
+			],
+		},
+		medical_outbreak: {
+			id: "medical_outbreak", category: "sector", sector: "medical",
+			title: "PATHOGEN OUTBREAK",
+			desc: "Unidentified pathogen spread through Block C. 800 crew symptomatic.",
+			timer: 3, cooldown: 12,
+			choices: [
+				{ label: "SAFE", text: "Full quarantine and treatment.", cost_desc: "1,500 medicine + 18,000 CR",
+				  cost: { medicine: -1500, credits: -18000 },
+				  effects: { medicine: -1500, credits: -18000 },
+				  result: "Outbreak contained. All treated." },
+				{ label: "MODERATE", text: "Quarantine. Treat worst cases.", cost_desc: "600 medicine",
+				  cost: { medicine: -600 },
+				  effects: { medicine: -600, crew_total: -200, morale: -0.05 },
+				  result: "Contained. Some casualties." },
+				{ label: "RISKY", text: "Vent the residential block.", cost_desc: "Brutal",
+				  cost: {}, effects: { crew_total: -800, morale: -0.25, gm_political_heat: 0.2 },
+				  result: "Block vented. Outbreak ended. You will stand trial eventually." },
+			],
+		},
+	},
+
+	tick(cycle) {
+		// Tick down active peril timers
+		for (let i = this.active_perils.length - 1; i >= 0; i--) {
+			const p = this.active_perils[i];
+			p.timer_remaining--;
+			if (p.timer_remaining <= 0) {
+				this._expire(i);
+			}
+		}
+		// Tick cooldowns
+		for (const id in this.cooldowns) {
+			this.cooldowns[id]--;
+			if (this.cooldowns[id] <= 0) delete this.cooldowns[id];
+		}
+		// Try to spawn
+		this._try_spawn(cycle);
+	},
+
+	_try_spawn(cycle) {
+		const max_active = cycle < 16 ? 1 : (cycle < 36 ? 2 : 3);
+		if (this.active_perils.length >= max_active) return;
+
+		const pool = [];
+		for (const id in this.PERILS) {
+			if (this.cooldowns[id]) continue;
+			if (this.active_perils.some(p => p.id === id)) continue;
+			pool.push(id);
+		}
+		if (pool.length === 0) return;
+
+		const spawn_chance = 0.15 + (GameState.threat_level * 0.35);
+		if (Math.random() > spawn_chance) return;
+
+		const chosen_id = pool[Math.floor(Math.random() * pool.length)];
+		this._spawn(chosen_id);
+	},
+
+	_spawn(id) {
+		const template = JSON.parse(JSON.stringify(this.PERILS[id]));
+		template.timer_remaining = template.timer;
+		this.active_perils.push(template);
+		this.cooldowns[id] = template.cooldown;
+		GameState.log_event("PERIL", `${template.title} — interrupt.`, "critical");
+		show_peril_modal(template, this.active_perils.length - 1);
+	},
+
+	_expire(index) {
+		const p = this.active_perils[index];
+		const penalties = {
+			combat: { station_hull: -0.15, morale: -0.08 },
+			gm: { gm_personal_threat: 0.2, gm_political_heat: 0.15 },
+			story: { morale: -0.12, threat_level: 0.1 },
+			sector: { hull_integrity: -0.08 },
+		};
+		GameState.apply_effects(penalties[p.category] || {});
+		GameState.log_event("PERIL", `${p.title} — UNRESOLVED. Consequences applied.`, "critical");
+		this.active_perils.splice(index, 1);
+	},
+
+	can_afford(choice) {
+		for (const key in choice.cost) {
+			if (choice.cost[key] < 0 && GameState.resources[key]) {
+				if (GameState.get_resource(key) < Math.abs(choice.cost[key])) return false;
+			}
+		}
+		return true;
+	},
+
+	resolve(peril_index, choice_index) {
+		const p = this.active_perils[peril_index];
+		if (!p) return;
+		const choice = p.choices[choice_index];
+		if (!choice) return;
+		if (!this.can_afford(choice)) {
+			GameState.log_event("PERIL", `Cannot resolve — insufficient resources.`, "warning");
+			return false;
+		}
+		GameState.apply_effects(choice.effects || {});
+		let result_text = choice.result;
+		if (choice.success_chance !== undefined) {
+			if (Math.random() <= choice.success_chance) {
+				GameState.apply_effects(choice.success_effects || {});
+				result_text = choice.result;
+			} else {
+				GameState.apply_effects(choice.fail_effects || {});
+				result_text = choice.result_fail;
+			}
+		}
+		GameState.log_event("PERIL", `${p.title} — ${result_text}`, "warning");
+		this.active_perils.splice(peril_index, 1);
+		return true;
+	},
+
+	reset() {
+		this.active_perils = [];
+		this.cooldowns = {};
+	},
+};
+
+function show_peril_modal(peril, peril_index) {
+	const modal = document.getElementById("peril-modal");
+	const cat_map = {
+		combat: "// COMBAT PERIL //",
+		gm: "// COMMAND PERIL //",
+		story: "// STORY PERIL //",
+		sector: "// SECTOR PERIL //",
+	};
+	document.getElementById("peril-category").textContent = cat_map[peril.category] || "// PERIL //";
+	document.getElementById("peril-title").textContent = peril.title;
+	document.getElementById("peril-timer").textContent = `EXPIRES IN ${peril.timer_remaining} CYCLES`;
+	document.getElementById("peril-desc").textContent = peril.desc;
+
+	const choices_div = document.getElementById("peril-choices");
+	let html = "";
+	const labels = ["safe", "moderate", "risky"];
+	peril.choices.forEach((c, i) => {
+		const cls = labels[i] || "safe";
+		html += `<button class="peril-choice-btn ${cls}" data-choice="${i}">
+			<div class="peril-choice-label">[${c.label}]</div>
+			<div class="peril-choice-text">${c.text}</div>
+			<div class="peril-choice-cost">${c.cost_desc}</div>
+		</button>`;
+	});
+	choices_div.innerHTML = html;
+
+	choices_div.querySelectorAll(".peril-choice-btn").forEach(btn => {
+		btn.addEventListener("click", () => {
+			const idx = parseInt(btn.dataset.choice);
+			if (PerilManager.resolve(peril_index, idx)) {
+				modal.style.display = "none";
+				if (PerilManager.active_perils.length > 0) {
+					show_peril_modal(PerilManager.active_perils[0], 0);
+				} else {
+					refresh_all();
+				}
+			}
+		});
+	});
+
+	modal.style.display = "flex";
+}
+// ============================================================
+// THREAT MANAGER
+// ============================================================
 // ============================================================
 // THREAT MANAGER
 // ============================================================
