@@ -34,9 +34,10 @@ body {
 #app {
 	display: grid;
 	grid-template-columns: 1fr;
-	grid-template-rows: auto auto 1fr auto;
+	grid-template-rows: auto auto auto 1fr auto;
 	grid-template-areas:
 		"header"
+		"resources"
 		"nav"
 		"content"
 		"right";
@@ -74,6 +75,53 @@ body {
 
 #status-line {
 	color: var(--accent-green);
+}
+
+#resource-bar {
+	grid-area: resources;
+	background: var(--bg-panel);
+	border-bottom: 1px solid var(--border-dim);
+	display: grid;
+	grid-template-columns: repeat(7, 1fr);
+	gap: 1px;
+	padding: 1px;
+}
+
+.resource-card {
+	background: var(--bg-card);
+	padding: 8px 4px;
+	text-align: center;
+	min-height: 56px;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+}
+
+.resource-label {
+	font-size: 9px;
+	letter-spacing: 1px;
+	color: var(--text-dim);
+	margin-bottom: 2px;
+}
+
+.resource-value {
+	font-size: 13px;
+	color: var(--text-bright);
+	font-weight: bold;
+}
+
+.resource-delta {
+	font-size: 10px;
+	color: var(--text-mid);
+	margin-top: 2px;
+}
+
+.resource-card.low .resource-value {
+	color: var(--accent-amber);
+}
+
+.resource-card.critical .resource-value {
+	color: var(--accent-rust);
 }
 
 #sector-nav {
@@ -173,9 +221,10 @@ body {
 @media (min-width: 900px) {
 	#app {
 		grid-template-columns: 200px 1fr 280px;
-		grid-template-rows: auto 1fr;
+		grid-template-rows: auto auto 1fr;
 		grid-template-areas:
 			"header header header"
+			"resources resources resources"
 			"nav content right";
 	}
 
