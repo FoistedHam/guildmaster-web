@@ -220,7 +220,115 @@ const GameState = {
 		return "CRITICAL";
 	},
 };
+// ============================================================
+// THREAT MANAGER
+// ============================================================
+const ThreatManager = {
+	active_threats: [],
 
+	THREAT_TYPES: {
+		piracy: {
+			id: "piracy",
+			name: "PIRATE INCURSION",
+			desc: "Raiders harassing supply lines. Each cycle drains credits and fuel.",
+			tick_effects: { credits: -2000, fuel: -200 },
+			responses: [
+				{ label: "PAY OFF", cost: { credits: -15000 }, success_chance: 1.0 },
+				{ label: "FIGHT", cost: { munitions: -800 }, success_chance: 0.7 },
+				{ label: "IGNORE", cost: {}, success_chance: 0 },
+			],
+		},
+		mutiny: {
+			id: "mutiny",
+			name: "MUTINY BREWING",
+			desc: "Unrest spreading through the lower decks. Morale drains each cycle.",
+			tick_effects: { morale: -0.05 },
+			responses: [
+				{ label: "GRANT CONCESSIONS", cost: { credits: -10000, food: -2000 }, success_chance: 0.9 },
+				{ label: "ARREST RINGLEADERS", cost: { morale: -0.1 }, success_chance: 0.6 },
+				{ label: "WAIT IT OUT", cost: {}, success_chance: 0 },
+			],
+		},
+		hull_breach: {
+			id: "hull_breach",
+			name: "MICROFRACTURE PROPAGATION",
+			desc: "Unsealed damage spreading. Hull integrity erodes each cycle.",
+			tick_effects: { hull_integrity: -0.04 },
+			responses: [
+				{ label: "FULL REPAIR", cost: { parts: -500, credits: -8000 }, success_chance: 1.0 },
+				{ label: "PATCH JOB", cost: { parts: -150 }, success_chance: 0.65 },
+				{ label: "DELAY", cost: {}, success_chance: 0 },
+			],
+		},
+		plague: {
+			id: "plague",
+			name: "PATHOGEN SPREAD",
+			desc: "Slow-moving illness affecting crew. Morale and crew slowly decline.",
+			tick_effects: { morale: -0.02, crew_total: -50 },
+			responses: [
+				{ label: "MASS TREATMENT", cost: { medicine: -800, credits: -10000 }, success_chance: 1.0 },
+				{ label: "QUARANTINE", cost: { morale: -0.05 }, success_chance: 0.7 },
+				{ label: "LET IT BURN", cost: {}, success_chance: 0 },
+			],
+		},
+	},
+
+	tick() {
+		// Apply ongoing damage from active threats
+		for (const t of this.active_threats) {
+			GameState.apply_effects(t.tick_effects);
+		}
+		// Roll for new threat
+		this.roll_spawn();
+	},
+
+	roll_spawn() {
+		const max_threats = GameState.cycle < 15 ? 1 : (GameState.cycle < 35 ? 2 : 3);
+		if (this.active_threats.length >= max_threats) return;
+
+		const spawn_chance = 0.1 + (GameState.threat_level * 0.3);
+		if (Math.random() > spawn_chance) return;
+
+		// Pick a random threat type not already active
+		const active_ids = this.active_threats.map(t => t.id);
+		const available = Object.values(this.THREAT_TYPES).filter(t => !active_ids.includes(t.id));
+		if (available.length === 0) return;
+
+		const type = available[Math.floor(Math.random() * available.length)];
+		this.active_threats.push({ ...type });
+		GameState.log_event("THREAT", `${type.name} detected.`, "warning");
+	},
+
+	respond(threat_index, response_index) {
+		const threat = this.active_threats[threat_index];
+		if (!threat) return;
+		const response = threat.responses[response_index];
+		if (!response) return;
+
+		// Check affordability
+		for (const key in response.cost) {
+			if (response.cost[key] < 0 && GameState.resources[key]) {
+				if (GameState.get_resource(key) < Math.abs(response.cost[key])) {
+					GameState.log_event("THREAT", `Cannot afford that response.`, "warning");
+					return;
+				}
+			}
+		}
+
+		GameState.apply_effects(response.cost);
+
+		if (Math.random() <= response.success_chance) {
+			GameState.log_event("THREAT", `${threat.name} resolved with ${response.label}.`, "info");
+			this.active_threats.splice(threat_index, 1);
+		} else {
+			GameState.log_event("THREAT", `${response.label} failed. ${threat.name} continues.`, "warning");
+		}
+	},
+
+	reset() {
+		this.active_threats = [];
+	},
+};
 // ============================================================
 // SECTOR EVENT MANAGER
 // ============================================================
