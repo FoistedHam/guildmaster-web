@@ -1,1 +1,1 @@
-
+console.log("Guildmaster booting...");
