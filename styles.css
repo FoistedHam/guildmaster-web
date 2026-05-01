@@ -479,4 +479,59 @@ body {
 	color: var(--text-dim);
 	font-style: italic;
 }
+#threat-panel {
+	background: var(--bg-card);
+	border: 1px solid var(--border-dim);
+	padding: 12px;
+	max-height: 280px;
+	overflow-y: auto;
+}
+
+#threat-panel h3 {
+	color: var(--text-mid);
+	font-size: 10px;
+	letter-spacing: 2px;
+	margin-bottom: 8px;
+}
+
+.threat-card {
+	background: var(--bg-panel);
+	border: 1px solid var(--accent-rust);
+	padding: 10px;
+	margin-bottom: 10px;
+}
+
+.threat-name {
+	color: var(--accent-rust);
+	font-size: 12px;
+	letter-spacing: 1px;
+	margin-bottom: 4px;
+}
+
+.threat-desc {
+	color: var(--text-mid);
+	font-size: 11px;
+	margin-bottom: 8px;
+	line-height: 1.4;
+}
+
+.threat-response-btn {
+	display: block;
+	width: 100%;
+	background: var(--bg-card);
+	color: var(--text-bright);
+	border: 1px solid var(--border-dim);
+	padding: 8px;
+	margin-bottom: 4px;
+	font-family: inherit;
+	font-size: 11px;
+	letter-spacing: 1px;
+	text-align: left;
+	cursor: pointer;
+}
+
+.threat-response-btn:hover, .threat-response-btn:active {
+	background: var(--bg-hover);
+	border-color: var(--border-bright);
+}	
 }
