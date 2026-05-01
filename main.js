@@ -7,14 +7,13 @@ const GameState = {
 	cycle: 1,
 	game_active: true,
 
-	// Resources
 	resources: {
-		credits:   { value: 50000, delta: 0 },
-		fuel:      { value: 8000,  delta: -50 },
-		food:      { value: 12000, delta: -100 },
-		munitions: { value: 3000,  delta: 0 },
-		parts:     { value: 2500,  delta: 0 },
-		medicine:  { value: 1500,  delta: -10 },
+		credits:   { value: 50000, delta: 0,    max: 100000, label: "CREDITS" },
+		fuel:      { value: 8000,  delta: -50,  max: 20000,  label: "FUEL" },
+		food:      { value: 12000, delta: -100, max: 30000,  label: "FOOD" },
+		munitions: { value: 3000,  delta: 0,    max: 10000,  label: "MUNITIONS" },
+		parts:     { value: 2500,  delta: 0,    max: 8000,   label: "PARTS" },
+		medicine:  { value: 1500,  delta: -10,  max: 5000,   label: "MEDICINE" },
 	},
 	crew_total: 10000,
 	morale: 0.7,
@@ -22,16 +21,15 @@ const GameState = {
 	station_hull: 1.0,
 	hull_integrity: 1.0,
 
-	// Sectors
 	sectors: {
-		travel:          { name: "Travel",          status: "nominal" },
+		travel:          { name: "Travel",            status: "nominal" },
 		trade_logistics: { name: "Trade & Logistics", status: "nominal" },
-		exploration:    { name: "Exploration",      status: "nominal" },
-		security_intel: { name: "Security & Intel", status: "nominal" },
-		politics_info:  { name: "Politics & Info",  status: "nominal" },
-		labor_affairs:  { name: "Labor & Affairs",  status: "nominal" },
-		engineering:    { name: "Engineering",      status: "nominal" },
-		medical:        { name: "Medical",          status: "nominal" },
+		exploration:     { name: "Exploration",       status: "nominal" },
+		security_intel:  { name: "Security & Intel",  status: "nominal" },
+		politics_info:   { name: "Politics & Info",   status: "nominal" },
+		labor_affairs:   { name: "Labor & Affairs",   status: "nominal" },
+		engineering:     { name: "Engineering",       status: "nominal" },
+		medical:         { name: "Medical",           status: "nominal" },
 	},
 
 	active_sector: "travel",
@@ -39,7 +37,6 @@ const GameState = {
 
 	advance_cycle() {
 		this.cycle++;
-		// Apply resource deltas
 		for (const key in this.resources) {
 			const r = this.resources[key];
 			r.value = Math.max(0, r.value + r.delta);
@@ -55,6 +52,11 @@ const GameState = {
 			severity: severity,
 		});
 		if (this.event_log.length > 50) this.event_log.pop();
+	},
+
+	get_resource_pct(key) {
+		const r = this.resources[key];
+		return r.value / r.max;
 	},
 
 	get_morale_label() {
@@ -86,6 +88,43 @@ function refresh_header() {
 		`MORALE: ${GameState.get_morale_label()} // THREAT: ${GameState.get_threat_label()}`;
 }
 
+function refresh_resources() {
+	const bar = document.getElementById("resource-bar");
+	let html = "";
+
+	// Crew card first
+	const crew_pct = GameState.crew_total / 15000;
+	let crew_class = "resource-card";
+	if (crew_pct < 0.3) crew_class += " critical";
+	else if (crew_pct < 0.5) crew_class += " low";
+	html += `
+		<div class="${crew_class}">
+			<div class="resource-label">CREW</div>
+			<div class="resource-value">${GameState.crew_total.toLocaleString()}</div>
+		</div>
+	`;
+
+	// Resource cards
+	for (const key in GameState.resources) {
+		const r = GameState.resources[key];
+		const pct = GameState.get_resource_pct(key);
+		let cls = "resource-card";
+		if (pct < 0.2) cls += " critical";
+		else if (pct < 0.4) cls += " low";
+
+		const delta_sign = r.delta > 0 ? "+" : "";
+		html += `
+			<div class="${cls}">
+				<div class="resource-label">${r.label}</div>
+				<div class="resource-value">${r.value.toLocaleString()}</div>
+				<div class="resource-delta">${delta_sign}${r.delta}</div>
+			</div>
+		`;
+	}
+
+	bar.innerHTML = html;
+}
+
 function refresh_log() {
 	const log_div = document.getElementById("cycle-log");
 	let html = "<h3>CYCLE LOG</h3>";
@@ -111,14 +150,14 @@ function refresh_content() {
 
 function refresh_sector_nav() {
 	const buttons = document.querySelectorAll(".sector-btn");
-	const keys = Object.keys(GameState.sectors);
-	buttons.forEach((btn, i) => {
-		btn.classList.toggle("active", keys[i] === GameState.active_sector);
+	buttons.forEach(btn => {
+		btn.classList.toggle("active", btn.dataset.sector === GameState.active_sector);
 	});
 }
 
 function refresh_all() {
 	refresh_header();
+	refresh_resources();
 	refresh_log();
 	refresh_content();
 	refresh_sector_nav();
@@ -143,10 +182,8 @@ function on_sector_click(sector_key) {
 function init() {
 	console.log("Guildmaster booting...");
 
-	const buttons = document.querySelectorAll(".sector-btn");
-	const keys = Object.keys(GameState.sectors);
-	buttons.forEach((btn, i) => {
-		btn.addEventListener("click", () => on_sector_click(keys[i]));
+	document.querySelectorAll(".sector-btn").forEach(btn => {
+		btn.addEventListener("click", () => on_sector_click(btn.dataset.sector));
 	});
 
 	document.getElementById("advance-btn").addEventListener("click", on_advance);
