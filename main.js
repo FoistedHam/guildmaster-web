@@ -120,6 +120,7 @@ const GameState = {
 		this.active_sector = "travel";
 		SectorEventManager.reset();
 		ThreatManager.reset();
+		PerilManager.reset();
 		this.log_event("CYCLE", `Guildmaster ${this.guildmaster_name} assumes command.`, "info");
 	},
 
@@ -132,6 +133,7 @@ const GameState = {
 		}
 		SectorEventManager.tick();
 		ThreatManager.tick();
+		PerilManager.tick(this.cycle);
 		this.log_event("CYCLE", `Cycle ${this.cycle} begins.`, "info");
 		this._check_loss();
 	},
@@ -140,23 +142,23 @@ const GameState = {
 		if (this.station_hull <= 0)
 			return this._game_over("Station hull failure. Decompression complete.", "combat");
 		if (this.hull_integrity <= 0)
-			return this._game_over("Structural integrity collapse. Station broken in two.", "combat");
+			return this._game_over("Structural integrity collapse.", "combat");
 		if (this.resources.food.value <= 0)
-			return this._game_over("Mass starvation. The crew turned on each other before they turned on you.", "combat");
+			return this._game_over("Mass starvation.", "combat");
 		if (this.resources.fuel.value <= 0)
-			return this._game_over("Fuel depleted. Life support offline. Cold and dark.", "combat");
+			return this._game_over("Fuel depleted. Life support offline.", "combat");
 		if (this.crew_total < 2000)
-			return this._game_over("Crew below operational minimum. Station nonfunctional.", "combat");
+			return this._game_over("Crew below operational minimum.", "combat");
 		if (this.morale <= 0.05)
-			return this._game_over("Mass mutiny. The crew dragged you out of your quarters.", "combat");
+			return this._game_over("Mass mutiny.", "combat");
 		if (!this.gm_alive)
 			return this._game_over("The Guildmaster is dead.", "gm");
 		if (this.gm_imprisoned)
-			return this._game_over("You have been imprisoned by Guild Central.", "gm");
+			return this._game_over("Imprisoned by Guild Central.", "gm");
 		if (this.gm_political_heat >= 1.0)
 			return this._game_over("Political heat reached terminal levels.", "gm");
 		if (this.gm_personal_threat >= 1.0)
-			return this._game_over("They came for you in the night. Successfully.", "gm");
+			return this._game_over("They came for you in the night.", "gm");
 	},
 
 	_game_over(reason, category) {
@@ -222,6 +224,7 @@ const GameState = {
 		return "CRITICAL";
 	},
 };
+
 // ============================================================
 // PERIL MANAGER
 // ============================================================
@@ -233,7 +236,7 @@ const PerilManager = {
 		pirate_raid: {
 			id: "pirate_raid", category: "combat", sector: "security_intel",
 			title: "PIRATE RAID INCOMING",
-			desc: "A corsair vessel has locked onto your outer docking ring. They demand tribute or they will breach the hull.",
+			desc: "A corsair vessel has locked onto your outer docking ring. They demand tribute or breach the hull.",
 			timer: 2, cooldown: 8,
 			choices: [
 				{ label: "SAFE", text: "Pay the tribute.", cost_desc: "25,000 CR",
@@ -255,7 +258,7 @@ const PerilManager = {
 		hull_breach: {
 			id: "hull_breach", category: "combat", sector: "engineering",
 			title: "HULL BREACH — SECTOR 7",
-			desc: "Catastrophic decompression in Sector 7. Bulkheads holding but failing. Crew evacuating.",
+			desc: "Catastrophic decompression in Sector 7. Bulkheads failing. Crew evacuating.",
 			timer: 2, cooldown: 10,
 			choices: [
 				{ label: "SAFE", text: "Emergency seal. Full repair.", cost_desc: "800 parts + 12,000 CR",
@@ -264,7 +267,7 @@ const PerilManager = {
 				{ label: "MODERATE", text: "Partial seal. Repair later.", cost_desc: "300 parts",
 				  cost: { parts: -300 }, effects: { parts: -300, hull_integrity: -0.05 },
 				  result: "Breach contained. Integrity compromised." },
-				{ label: "RISKY", text: "Sacrifice the sector. Seal it permanently.", cost_desc: "800 crew lost",
+				{ label: "RISKY", text: "Sacrifice the sector permanently.", cost_desc: "800 crew lost",
 				  cost: {}, effects: { crew_total: -800, morale: -0.12 },
 				  result: "Sector sealed. Crew inside lost. Station intact." },
 			],
@@ -288,7 +291,7 @@ const PerilManager = {
 				  cost: {}, effects: { gm_political_heat: 0.2 }, success_chance: 0.5,
 				  success_effects: { gm_personal_threat: -0.25 },
 				  fail_effects: { gm_political_heat: 0.15, gm_personal_threat: 0.1 },
-				  result: "Accusation landed. Threat reduced.",
+				  result: "Accusation landed.",
 				  result_fail: "Accusation backfired." },
 			],
 		},
@@ -300,7 +303,7 @@ const PerilManager = {
 			choices: [
 				{ label: "SAFE", text: "Comply fully.", cost_desc: "30,000 CR",
 				  cost: { credits: -30000 }, effects: { credits: -30000, gm_political_heat: -0.25 },
-				  result: "Tribunal satisfied. Heat reduced." },
+				  result: "Tribunal satisfied." },
 				{ label: "MODERATE", text: "Negotiate concessions.", cost_desc: "15,000 CR — 60%",
 				  cost: { credits: -15000 }, effects: { credits: -15000, gm_political_heat: -0.1 },
 				  success_chance: 0.6, success_effects: { gm_political_heat: -0.15 },
@@ -318,7 +321,7 @@ const PerilManager = {
 		labor_strike: {
 			id: "labor_strike", category: "story", sector: "labor_affairs",
 			title: "GENERAL LABOR STRIKE",
-			desc: "Union Councils have called a general strike. Productivity drops every cycle this continues.",
+			desc: "Union Councils have called a general strike. Productivity drops every cycle.",
 			timer: 4, cooldown: 10,
 			choices: [
 				{ label: "SAFE", text: "Meet union demands.", cost_desc: "25,000 CR + 4,000 food",
@@ -375,27 +378,21 @@ const PerilManager = {
 	},
 
 	tick(cycle) {
-		// Tick down active peril timers
 		for (let i = this.active_perils.length - 1; i >= 0; i--) {
 			const p = this.active_perils[i];
 			p.timer_remaining--;
-			if (p.timer_remaining <= 0) {
-				this._expire(i);
-			}
+			if (p.timer_remaining <= 0) this._expire(i);
 		}
-		// Tick cooldowns
 		for (const id in this.cooldowns) {
 			this.cooldowns[id]--;
 			if (this.cooldowns[id] <= 0) delete this.cooldowns[id];
 		}
-		// Try to spawn
 		this._try_spawn(cycle);
 	},
 
 	_try_spawn(cycle) {
 		const max_active = cycle < 16 ? 1 : (cycle < 36 ? 2 : 3);
 		if (this.active_perils.length >= max_active) return;
-
 		const pool = [];
 		for (const id in this.PERILS) {
 			if (this.cooldowns[id]) continue;
@@ -403,10 +400,8 @@ const PerilManager = {
 			pool.push(id);
 		}
 		if (pool.length === 0) return;
-
-		const spawn_chance = 0.15 + (GameState.threat_level * 0.35);
+		const spawn_chance = 0.3 + (GameState.threat_level * 0.4);
 		if (Math.random() > spawn_chance) return;
-
 		const chosen_id = pool[Math.floor(Math.random() * pool.length)];
 		this._spawn(chosen_id);
 	},
@@ -444,9 +439,9 @@ const PerilManager = {
 
 	resolve(peril_index, choice_index) {
 		const p = this.active_perils[peril_index];
-		if (!p) return;
+		if (!p) return false;
 		const choice = p.choices[choice_index];
-		if (!choice) return;
+		if (!choice) return false;
 		if (!this.can_afford(choice)) {
 			GameState.log_event("PERIL", `Cannot resolve — insufficient resources.`, "warning");
 			return false;
@@ -515,9 +510,7 @@ function show_peril_modal(peril, peril_index) {
 
 	modal.style.display = "flex";
 }
-// ============================================================
-// THREAT MANAGER
-// ============================================================
+
 // ============================================================
 // THREAT MANAGER
 // ============================================================
@@ -526,9 +519,8 @@ const ThreatManager = {
 
 	THREAT_TYPES: {
 		piracy: {
-			id: "piracy",
-			name: "PIRATE INCURSION",
-			desc: "Raiders harassing supply lines. Each cycle drains credits and fuel.",
+			id: "piracy", name: "PIRATE INCURSION",
+			desc: "Raiders harassing supply lines. Drains credits and fuel each cycle.",
 			tick_effects: { credits: -2000, fuel: -200 },
 			responses: [
 				{ label: "PAY OFF", cost: { credits: -15000 }, success_chance: 1.0 },
@@ -537,9 +529,8 @@ const ThreatManager = {
 			],
 		},
 		mutiny: {
-			id: "mutiny",
-			name: "MUTINY BREWING",
-			desc: "Unrest spreading through the lower decks. Morale drains each cycle.",
+			id: "mutiny", name: "MUTINY BREWING",
+			desc: "Unrest spreading. Morale drains each cycle.",
 			tick_effects: { morale: -0.05 },
 			responses: [
 				{ label: "GRANT CONCESSIONS", cost: { credits: -10000, food: -2000 }, success_chance: 0.9 },
@@ -548,9 +539,8 @@ const ThreatManager = {
 			],
 		},
 		hull_breach: {
-			id: "hull_breach",
-			name: "MICROFRACTURE PROPAGATION",
-			desc: "Unsealed damage spreading. Hull integrity erodes each cycle.",
+			id: "hull_breach", name: "MICROFRACTURE PROPAGATION",
+			desc: "Damage spreading. Hull integrity erodes each cycle.",
 			tick_effects: { hull_integrity: -0.04 },
 			responses: [
 				{ label: "FULL REPAIR", cost: { parts: -500, credits: -8000 }, success_chance: 1.0 },
@@ -559,9 +549,8 @@ const ThreatManager = {
 			],
 		},
 		plague: {
-			id: "plague",
-			name: "PATHOGEN SPREAD",
-			desc: "Slow-moving illness affecting crew. Morale and crew slowly decline.",
+			id: "plague", name: "PATHOGEN SPREAD",
+			desc: "Slow illness. Morale and crew slowly decline.",
 			tick_effects: { morale: -0.02, crew_total: -50 },
 			responses: [
 				{ label: "MASS TREATMENT", cost: { medicine: -800, credits: -10000 }, success_chance: 1.0 },
@@ -621,244 +610,105 @@ const ThreatManager = {
 // ============================================================
 // SECTOR EVENT MANAGER
 // ============================================================
-const COOLDOWN_SHORT  = 3;
+const COOLDOWN_SHORT = 3;
 const COOLDOWN_MEDIUM = 5;
-const COOLDOWN_LONG   = 8;
+const COOLDOWN_LONG = 8;
 
 const SectorEventManager = {
 	cooldowns: {},
-
 	EVENTS: {
-		boost_tourism: {
-			id: "boost_tourism", sector: "travel",
-			name: "BOOST TOURISM",
-			desc: "Expand tourism capacity. +6,000 CR immediate.",
-			flavor: "Fresh credits. Fresh faces. Fresh problems.",
-			cost: { credits: -2000 },
-			cooldown: COOLDOWN_MEDIUM,
-			effects: { credits: 4000 },
-			result: "Tourism expanded. Credits flowing in.",
-		},
-		short_range_contracts: {
-			id: "short_range_contracts", sector: "travel",
-			name: "SHORT RANGE CONTRACTS",
-			desc: "Post local courier contracts. +6,000 CR.",
-			flavor: "Dangerous work. Decent pay. No questions asked.",
-			cost: {},
-			cooldown: COOLDOWN_SHORT,
-			effects: { credits: 6000 },
-			result: "Courier contracts posted. Credits incoming.",
-		},
-		emergency_recall: {
-			id: "emergency_recall", sector: "travel",
-			name: "EMERGENCY RECALL",
-			desc: "Cancel outbound travel. Reduces threat.",
-			flavor: "Nobody leaves until we know what is out there.",
-			cost: {},
-			cooldown: COOLDOWN_LONG,
-			effects: { threat_level: -0.05, morale: -0.03 },
-			result: "Outbound travel cancelled.",
-		},
-		buy_fuel_bulk: {
-			id: "buy_fuel_bulk", sector: "trade_logistics",
-			name: "BUY FUEL BULK",
-			desc: "Purchase 2,000 fuel cells.",
-			flavor: "The station breathes fuel. Never let it run dry.",
-			cost: { credits: -12000 },
-			cooldown: COOLDOWN_SHORT,
-			effects: { credits: -12000, fuel: 2000 },
-			result: "2,000 fuel cells acquired.",
-		},
-		implement_rationing: {
-			id: "implement_rationing", sector: "trade_logistics",
-			name: "IMPLEMENT RATIONING",
-			desc: "Reduce food consumption. Morale hit.",
-			flavor: "They will grumble. They will comply.",
-			cost: {},
-			cooldown: COOLDOWN_MEDIUM,
-			effects: { morale: -0.06 },
-			result: "Rationing implemented. Crew unhappy but fed.",
-		},
-		supply_chain_audit: {
-			id: "supply_chain_audit", sector: "trade_logistics",
-			name: "SUPPLY CHAIN AUDIT",
-			desc: "Find inefficiencies. +8,000 CR recovered.",
-			flavor: "Someone is always skimming. Always.",
-			cost: {},
-			cooldown: COOLDOWN_LONG,
-			effects: { credits: 8000 },
-			result: "Audit complete. Recovered embezzled credits.",
-		},
-		deploy_sensor_buoys: {
-			id: "deploy_sensor_buoys", sector: "exploration",
-			name: "DEPLOY SENSOR BUOYS",
-			desc: "Expand defensive coverage. Reduces threat.",
-			flavor: "You cannot fight what you cannot see.",
-			cost: { credits: -8000 },
-			cooldown: COOLDOWN_MEDIUM,
-			effects: { credits: -8000, threat_level: -0.06 },
-			result: "Sensor buoys deployed.",
-		},
-		expedition_contract: {
-			id: "expedition_contract", sector: "exploration",
-			name: "POST EXPEDITION CONTRACT",
-			desc: "Advertise paid expedition. +10,400 CR.",
-			flavor: "Let someone else take the risk. Charge them for the privilege.",
-			cost: { credits: -2000 },
-			cooldown: COOLDOWN_SHORT,
-			effects: { credits: 10400 },
-			result: "Expedition contract posted.",
-		},
-		lockdown_protocol: {
-			id: "lockdown_protocol", sector: "security_intel",
-			name: "LOCKDOWN PROTOCOL",
-			desc: "Reduces threat, hurts morale.",
-			flavor: "Order restored. Freedom suspended.",
-			cost: { credits: -6000 },
-			cooldown: COOLDOWN_MEDIUM,
-			effects: { credits: -6000, threat_level: -0.08, morale: -0.04 },
-			result: "Lockdown executed.",
-		},
-		restock_armoury: {
-			id: "restock_armoury", sector: "security_intel",
-			name: "RESTOCK ARMOURY",
-			desc: "Purchase 1,000 munitions.",
-			flavor: "An empty armoury is an invitation.",
-			cost: { credits: -8000 },
-			cooldown: COOLDOWN_SHORT,
-			effects: { credits: -8000, munitions: 1000 },
-			result: "Armoury restocked.",
-		},
-		purge_agents: {
-			id: "purge_agents", sector: "security_intel",
-			name: "PURGE SUSPECTED AGENTS",
-			desc: "Risk of innocent casualties.",
-			flavor: "Better a hundred wrongful arrests than one assassination.",
-			cost: {},
-			cooldown: COOLDOWN_LONG,
-			effects: { threat_level: -0.1, morale: -0.1, gm_political_heat: 0.1 },
-			result: "Purge conducted. Crew shaken.",
-		},
-		dispatch_envoy: {
-			id: "dispatch_envoy", sector: "politics_info",
-			name: "DISPATCH ENVOY",
-			desc: "Improve faction relations.",
-			flavor: "Diplomacy is just war with paperwork.",
-			cost: { credits: -5000 },
-			cooldown: COOLDOWN_MEDIUM,
-			effects: { credits: -5000, gm_political_heat: -0.05 },
-			result: "Envoy dispatched.",
-		},
-		broadcast_propaganda: {
-			id: "broadcast_propaganda", sector: "politics_info",
-			name: "BROADCAST PROPAGANDA",
-			desc: "Boost station morale.",
-			flavor: "The truth is whatever the broadcast says it is.",
-			cost: { credits: -3000 },
-			cooldown: COOLDOWN_SHORT,
-			effects: { credits: -3000, morale: 0.06 },
-			result: "Propaganda broadcast.",
-		},
-		narrative_control: {
-			id: "narrative_control", sector: "politics_info",
-			name: "NARRATIVE CONTROL",
-			desc: "Suppress damaging information.",
-			flavor: "What they do not know cannot hurt you.",
-			cost: { credits: -8000 },
-			cooldown: COOLDOWN_LONG,
-			effects: { credits: -8000, gm_political_heat: -0.12 },
-			result: "Narrative suppressed.",
-		},
-		negotiate_unions: {
-			id: "negotiate_unions", sector: "labor_affairs",
-			name: "NEGOTIATE WITH UNIONS",
-			desc: "Resolve grievances. +5% morale.",
-			flavor: "They want to be heard. Sometimes that is enough.",
-			cost: { credits: -8000 },
-			cooldown: COOLDOWN_MEDIUM,
-			effects: { credits: -8000, morale: 0.05 },
-			result: "Negotiations successful.",
-		},
-		grant_rations: {
-			id: "grant_rations", sector: "labor_affairs",
-			name: "GRANT RATION INCREASE",
-			desc: "Improve morale. Costs food.",
-			flavor: "Full bellies make for quieter corridors.",
-			cost: {},
-			cooldown: COOLDOWN_MEDIUM,
-			effects: { food: -3000, morale: 0.08 },
-			result: "Ration increase granted.",
-		},
-		mandatory_overtime: {
-			id: "mandatory_overtime", sector: "labor_affairs",
-			name: "MANDATORY OVERTIME",
-			desc: "Boost credits. Morale takes a hard hit.",
-			flavor: "Rest is a luxury. Survival is not.",
-			cost: {},
-			cooldown: COOLDOWN_LONG,
-			effects: { credits: 8000, morale: -0.12 },
-			result: "Overtime enforced.",
-		},
-		emergency_repairs: {
-			id: "emergency_repairs", sector: "engineering",
-			name: "EMERGENCY HULL REPAIRS",
-			desc: "Restore hull integrity +10%.",
-			flavor: "Patch it. Pray it holds.",
-			cost: { credits: -5000, parts: -300 },
-			cooldown: COOLDOWN_SHORT,
-			effects: { credits: -5000, parts: -300, hull_integrity: 0.1 },
-			result: "Hull integrity restored.",
-		},
-		fabrication_run: {
-			id: "fabrication_run", sector: "engineering",
-			name: "FABRICATION RUN",
-			desc: "Produce 400 parts.",
-			flavor: "Everything breaks eventually.",
-			cost: { credits: -6000 },
-			cooldown: COOLDOWN_SHORT,
-			effects: { credits: -6000, parts: 400 },
-			result: "400 parts produced.",
-		},
-		power_grid_upgrade: {
-			id: "power_grid_upgrade", sector: "engineering",
-			name: "UPGRADE POWER GRID",
-			desc: "Improve power efficiency.",
-			flavor: "Efficiency is survival measured in kilowatts.",
-			cost: { credits: -15000 },
-			cooldown: COOLDOWN_LONG,
-			effects: { credits: -15000, hull_integrity: 0.05 },
-			result: "Power grid upgraded.",
-		},
-		restock_medical: {
-			id: "restock_medical", sector: "medical",
-			name: "RESTOCK MEDICAL",
-			desc: "Purchase 800 medicine.",
-			flavor: "You cannot treat the dead.",
-			cost: { credits: -6000 },
-			cooldown: COOLDOWN_SHORT,
-			effects: { credits: -6000, medicine: 800 },
-			result: "Medical supplies restocked.",
-		},
-		mass_inoculation: {
-			id: "mass_inoculation", sector: "medical",
-			name: "MASS INOCULATION",
-			desc: "Reduce outbreak risk.",
-			flavor: "Prevention is cheap. Outbreaks are not.",
-			cost: { credits: -10000, medicine: -400 },
-			cooldown: COOLDOWN_LONG,
-			effects: { credits: -10000, medicine: -400, morale: 0.02, threat_level: -0.02 },
-			result: "Mass inoculation complete.",
-		},
-		quarantine_block: {
-			id: "quarantine_block", sector: "medical",
-			name: "QUARANTINE BLOCK",
-			desc: "Prevents spread. Crew unhappy.",
-			flavor: "The locked door is the kindest thing.",
-			cost: {},
-			cooldown: COOLDOWN_MEDIUM,
-			effects: { morale: -0.06, threat_level: -0.03 },
-			result: "Block quarantined.",
-		},
+		boost_tourism: { id: "boost_tourism", sector: "travel", name: "BOOST TOURISM",
+			desc: "Expand tourism. +6,000 CR.", flavor: "Fresh credits. Fresh problems.",
+			cost: { credits: -2000 }, cooldown: COOLDOWN_MEDIUM,
+			effects: { credits: 4000 }, result: "Tourism expanded." },
+		short_range_contracts: { id: "short_range_contracts", sector: "travel", name: "SHORT RANGE CONTRACTS",
+			desc: "Post local courier contracts. +6,000 CR.", flavor: "Dangerous work. Decent pay.",
+			cost: {}, cooldown: COOLDOWN_SHORT,
+			effects: { credits: 6000 }, result: "Contracts posted." },
+		emergency_recall: { id: "emergency_recall", sector: "travel", name: "EMERGENCY RECALL",
+			desc: "Cancel outbound travel. Reduces threat.", flavor: "Nobody leaves until we know.",
+			cost: {}, cooldown: COOLDOWN_LONG,
+			effects: { threat_level: -0.05, morale: -0.03 }, result: "Travel cancelled." },
+		buy_fuel_bulk: { id: "buy_fuel_bulk", sector: "trade_logistics", name: "BUY FUEL BULK",
+			desc: "Purchase 2,000 fuel cells.", flavor: "Never let it run dry.",
+			cost: { credits: -12000 }, cooldown: COOLDOWN_SHORT,
+			effects: { credits: -12000, fuel: 2000 }, result: "Fuel acquired." },
+		implement_rationing: { id: "implement_rationing", sector: "trade_logistics", name: "IMPLEMENT RATIONING",
+			desc: "Reduce food consumption. Morale hit.", flavor: "They will grumble. They will comply.",
+			cost: {}, cooldown: COOLDOWN_MEDIUM,
+			effects: { morale: -0.06 }, result: "Rationing implemented." },
+		supply_chain_audit: { id: "supply_chain_audit", sector: "trade_logistics", name: "SUPPLY CHAIN AUDIT",
+			desc: "Find inefficiencies. +8,000 CR.", flavor: "Someone is always skimming.",
+			cost: {}, cooldown: COOLDOWN_LONG,
+			effects: { credits: 8000 }, result: "Audit complete." },
+		deploy_sensor_buoys: { id: "deploy_sensor_buoys", sector: "exploration", name: "DEPLOY SENSOR BUOYS",
+			desc: "Expand defensive coverage.", flavor: "You cannot fight what you cannot see.",
+			cost: { credits: -8000 }, cooldown: COOLDOWN_MEDIUM,
+			effects: { credits: -8000, threat_level: -0.06 }, result: "Buoys deployed." },
+		expedition_contract: { id: "expedition_contract", sector: "exploration", name: "POST EXPEDITION CONTRACT",
+			desc: "Advertise paid expedition. +10,400 CR.", flavor: "Let someone else take the risk.",
+			cost: { credits: -2000 }, cooldown: COOLDOWN_SHORT,
+			effects: { credits: 10400 }, result: "Contract posted." },
+		lockdown_protocol: { id: "lockdown_protocol", sector: "security_intel", name: "LOCKDOWN PROTOCOL",
+			desc: "Reduces threat, hurts morale.", flavor: "Order restored. Freedom suspended.",
+			cost: { credits: -6000 }, cooldown: COOLDOWN_MEDIUM,
+			effects: { credits: -6000, threat_level: -0.08, morale: -0.04 }, result: "Lockdown executed." },
+		restock_armoury: { id: "restock_armoury", sector: "security_intel", name: "RESTOCK ARMOURY",
+			desc: "Purchase 1,000 munitions.", flavor: "An empty armoury is an invitation.",
+			cost: { credits: -8000 }, cooldown: COOLDOWN_SHORT,
+			effects: { credits: -8000, munitions: 1000 }, result: "Armoury restocked." },
+		purge_agents: { id: "purge_agents", sector: "security_intel", name: "PURGE SUSPECTED AGENTS",
+			desc: "Risk of innocent casualties.", flavor: "Better wrongful arrests than assassination.",
+			cost: {}, cooldown: COOLDOWN_LONG,
+			effects: { threat_level: -0.1, morale: -0.1, gm_political_heat: 0.1 }, result: "Purge conducted." },
+		dispatch_envoy: { id: "dispatch_envoy", sector: "politics_info", name: "DISPATCH ENVOY",
+			desc: "Improve faction relations.", flavor: "Diplomacy is war with paperwork.",
+			cost: { credits: -5000 }, cooldown: COOLDOWN_MEDIUM,
+			effects: { credits: -5000, gm_political_heat: -0.05 }, result: "Envoy dispatched." },
+		broadcast_propaganda: { id: "broadcast_propaganda", sector: "politics_info", name: "BROADCAST PROPAGANDA",
+			desc: "Boost station morale.", flavor: "The truth is whatever the broadcast says.",
+			cost: { credits: -3000 }, cooldown: COOLDOWN_SHORT,
+			effects: { credits: -3000, morale: 0.06 }, result: "Propaganda broadcast." },
+		narrative_control: { id: "narrative_control", sector: "politics_info", name: "NARRATIVE CONTROL",
+			desc: "Suppress damaging information.", flavor: "What they do not know cannot hurt you.",
+			cost: { credits: -8000 }, cooldown: COOLDOWN_LONG,
+			effects: { credits: -8000, gm_political_heat: -0.12 }, result: "Narrative suppressed." },
+		negotiate_unions: { id: "negotiate_unions", sector: "labor_affairs", name: "NEGOTIATE WITH UNIONS",
+			desc: "Resolve grievances. +5% morale.", flavor: "They want to be heard.",
+			cost: { credits: -8000 }, cooldown: COOLDOWN_MEDIUM,
+			effects: { credits: -8000, morale: 0.05 }, result: "Negotiations successful." },
+		grant_rations: { id: "grant_rations", sector: "labor_affairs", name: "GRANT RATION INCREASE",
+			desc: "Improve morale. Costs food.", flavor: "Full bellies make quieter corridors.",
+			cost: {}, cooldown: COOLDOWN_MEDIUM,
+			effects: { food: -3000, morale: 0.08 }, result: "Rations increased." },
+		mandatory_overtime: { id: "mandatory_overtime", sector: "labor_affairs", name: "MANDATORY OVERTIME",
+			desc: "Boost credits. Morale takes a hard hit.", flavor: "Rest is a luxury.",
+			cost: {}, cooldown: COOLDOWN_LONG,
+			effects: { credits: 8000, morale: -0.12 }, result: "Overtime enforced." },
+		emergency_repairs: { id: "emergency_repairs", sector: "engineering", name: "EMERGENCY HULL REPAIRS",
+			desc: "Restore hull integrity +10%.", flavor: "Patch it. Pray it holds.",
+			cost: { credits: -5000, parts: -300 }, cooldown: COOLDOWN_SHORT,
+			effects: { credits: -5000, parts: -300, hull_integrity: 0.1 }, result: "Hull restored." },
+		fabrication_run: { id: "fabrication_run", sector: "engineering", name: "FABRICATION RUN",
+			desc: "Produce 400 parts.", flavor: "Everything breaks eventually.",
+			cost: { credits: -6000 }, cooldown: COOLDOWN_SHORT,
+			effects: { credits: -6000, parts: 400 }, result: "Parts produced." },
+		power_grid_upgrade: { id: "power_grid_upgrade", sector: "engineering", name: "UPGRADE POWER GRID",
+			desc: "Improve power efficiency.", flavor: "Efficiency is survival.",
+			cost: { credits: -15000 }, cooldown: COOLDOWN_LONG,
+			effects: { credits: -15000, hull_integrity: 0.05 }, result: "Grid upgraded." },
+		restock_medical: { id: "restock_medical", sector: "medical", name: "RESTOCK MEDICAL",
+			desc: "Purchase 800 medicine.", flavor: "You cannot treat the dead.",
+			cost: { credits: -6000 }, cooldown: COOLDOWN_SHORT,
+			effects: { credits: -6000, medicine: 800 }, result: "Medical restocked." },
+		mass_inoculation: { id: "mass_inoculation", sector: "medical", name: "MASS INOCULATION",
+			desc: "Reduce outbreak risk.", flavor: "Prevention is cheap.",
+			cost: { credits: -10000, medicine: -400 }, cooldown: COOLDOWN_LONG,
+			effects: { credits: -10000, medicine: -400, morale: 0.02, threat_level: -0.02 }, result: "Inoculation complete." },
+		quarantine_block: { id: "quarantine_block", sector: "medical", name: "QUARANTINE BLOCK",
+			desc: "Prevents spread. Crew unhappy.", flavor: "The locked door is the kindest thing.",
+			cost: {}, cooldown: COOLDOWN_MEDIUM,
+			effects: { morale: -0.06, threat_level: -0.03 }, result: "Block quarantined." },
 	},
 
 	tick() {
@@ -867,58 +717,40 @@ const SectorEventManager = {
 			if (this.cooldowns[id] <= 0) delete this.cooldowns[id];
 		}
 	},
-
 	get_events_for_sector(sector_key) {
 		return Object.values(this.EVENTS).filter(e => e.sector === sector_key);
 	},
-
-	is_on_cooldown(event_id) {
-		return this.cooldowns[event_id] !== undefined;
-	},
-
-	get_cooldown(event_id) {
-		return this.cooldowns[event_id] || 0;
-	},
-
+	is_on_cooldown(event_id) { return this.cooldowns[event_id] !== undefined; },
+	get_cooldown(event_id) { return this.cooldowns[event_id] || 0; },
 	can_afford(event_id) {
 		const ev = this.EVENTS[event_id];
 		if (!ev) return false;
 		for (const key in ev.cost) {
-			if (ev.cost[key] < 0) {
-				if (GameState.get_resource(key) < Math.abs(ev.cost[key])) return false;
-			}
+			if (ev.cost[key] < 0 && GameState.get_resource(key) < Math.abs(ev.cost[key])) return false;
 		}
 		return true;
 	},
-
 	execute(event_id) {
 		const ev = this.EVENTS[event_id];
 		if (!ev) return;
 		if (!this.can_afford(event_id)) {
-			GameState.log_event("EVENT", `Cannot execute — insufficient resources.`, "warning");
+			GameState.log_event("EVENT", `Insufficient resources.`, "warning");
 			return;
 		}
 		GameState.apply_effects(ev.effects);
 		GameState.log_event(ev.sector.toUpperCase(), ev.result, "info");
 		this.cooldowns[event_id] = ev.cooldown;
 	},
-
-	reset() {
-		this.cooldowns = {};
-	},
+	reset() { this.cooldowns = {}; },
 };
 
 // ============================================================
 // UI REFRESH
 // ============================================================
 function refresh_header() {
-	document.getElementById("station-name").textContent =
-		`STATION ${GameState.station_name} // COMMAND DECK`;
-	document.getElementById("cycle-display").textContent =
-		`CYCLE ${String(GameState.cycle).padStart(3, "0")}`;
-	document.getElementById("gm-name").textContent =
-		`GUILDMASTER: ${GameState.guildmaster_name}`;
-
+	document.getElementById("station-name").textContent = `STATION ${GameState.station_name} // COMMAND DECK`;
+	document.getElementById("cycle-display").textContent = `CYCLE ${String(GameState.cycle).padStart(3, "0")}`;
+	document.getElementById("gm-name").textContent = `GUILDMASTER: ${GameState.guildmaster_name}`;
 	const status = document.getElementById("status-line");
 	status.textContent = `MORALE: ${GameState.get_morale_label()} // THREAT: ${GameState.get_threat_label()}`;
 	status.className = "";
@@ -929,13 +761,11 @@ function refresh_header() {
 function refresh_resources() {
 	const bar = document.getElementById("resource-bar");
 	let html = "";
-
 	const crew_pct = GameState.crew_total / 15000;
 	let crew_class = "resource-card";
 	if (crew_pct < 0.3) crew_class += " critical";
 	else if (crew_pct < 0.5) crew_class += " low";
 	html += `<div class="${crew_class}"><div class="resource-label">CREW</div><div class="resource-value">${GameState.crew_total.toLocaleString()}</div></div>`;
-
 	for (const key in GameState.resources) {
 		const r = GameState.resources[key];
 		const pct = GameState.get_resource_pct(key);
@@ -965,16 +795,13 @@ function refresh_log() {
 function refresh_content() {
 	const content = document.getElementById("content");
 	const sector = GameState.sectors[GameState.active_sector];
-
 	let html = `<h2>${sector.name.toUpperCase()}</h2>`;
 	html += `<p style="color: var(--text-mid); font-size:12px;">STATUS: ${sector.status.toUpperCase()} // CREW: ${sector.crew_assigned} / ${sector.crew_min}</p>`;
-
 	html += `<div class="section-title">SUBSECTORS</div>`;
 	for (const sub_key in sector.subsectors) {
 		const sub = sector.subsectors[sub_key];
 		html += `<div class="subsector-row"><span class="subsector-name">${sub.name}</span><span class="subsector-crew">${sub.crew} crew</span><span class="subsector-status ${sub.status}">${sub.status.toUpperCase()}</span></div>`;
 	}
-
 	html += `<div class="section-title">SECTOR EVENTS</div>`;
 	const events = SectorEventManager.get_events_for_sector(GameState.active_sector);
 	if (events.length === 0) {
@@ -986,7 +813,6 @@ function refresh_content() {
 			let cls = "event-btn";
 			let label = ev.name;
 			let disabled = "";
-
 			if (on_cooldown) {
 				const cd = SectorEventManager.get_cooldown(ev.id);
 				cls += " cooldown";
@@ -997,7 +823,6 @@ function refresh_content() {
 				label = `${ev.name} [INSUFFICIENT]`;
 				disabled = "disabled";
 			}
-
 			html += `<button class="${cls}" data-event="${ev.id}" ${disabled}>
 				<div class="event-name">${label}</div>
 				<div class="event-desc">${ev.desc}</div>
@@ -1005,9 +830,7 @@ function refresh_content() {
 			</button>`;
 		}
 	}
-
 	content.innerHTML = html;
-
 	content.querySelectorAll(".event-btn").forEach(btn => {
 		if (btn.disabled) return;
 		btn.addEventListener("click", () => on_sector_event(btn.dataset.event));
@@ -1027,7 +850,6 @@ function refresh_advance_btn() {
 	if (GameState.station_hull < 0.2) warnings.push("HULL CRIT");
 	if (GameState.get_resource_pct("food") < 0.15) warnings.push("FOOD LOW");
 	if (GameState.get_resource_pct("fuel") < 0.15) warnings.push("FUEL LOW");
-
 	if (warnings.length > 0) {
 		btn.textContent = `ADVANCE [!] ${warnings.join(" // ")}`;
 		btn.classList.add("warning");
@@ -1050,9 +872,7 @@ function refresh_threats() {
 			html += `<div class="threat-desc">${threat.desc}</div>`;
 			threat.responses.forEach((resp, ri) => {
 				const cost_parts = [];
-				for (const key in resp.cost) {
-					cost_parts.push(`${resp.cost[key]} ${key}`);
-				}
+				for (const key in resp.cost) cost_parts.push(`${resp.cost[key]} ${key}`);
 				const cost_str = cost_parts.length > 0 ? ` (${cost_parts.join(", ")})` : "";
 				const chance_str = resp.success_chance < 1 ? ` [${Math.floor(resp.success_chance * 100)}%]` : "";
 				html += `<button class="threat-response-btn" data-threat="${i}" data-response="${ri}">${resp.label}${cost_str}${chance_str}</button>`;
@@ -1061,7 +881,6 @@ function refresh_threats() {
 		});
 	}
 	panel.innerHTML = html;
-
 	panel.querySelectorAll(".threat-response-btn").forEach(btn => {
 		btn.addEventListener("click", () => {
 			ThreatManager.respond(parseInt(btn.dataset.threat), parseInt(btn.dataset.response));
@@ -1088,13 +907,11 @@ const EPITAPHS = {
 		"The station did not mourn. Stations never do.",
 		"Hull integrity: zero. Legacy: disputed.",
 		"The void is patient. You were not.",
-		"Structural failure is just physics. This was preventable.",
 	],
 	gm: [
 		"No successor was named. That was intentional.",
 		"The Guild scrubbed your name from the records. Again.",
 		"Power is borrowed. Someone called in the debt.",
-		"You saw it coming. Everyone did.",
 	],
 };
 
@@ -1102,23 +919,18 @@ function show_game_over(reason, category) {
 	const screen = document.getElementById("game-over-screen");
 	const epitaphs = EPITAPHS[category] || EPITAPHS.combat;
 	const epitaph = epitaphs[Math.floor(Math.random() * epitaphs.length)];
-
 	let category_text = "// STATION LOST //";
 	if (category === "combat") category_text = "// COMBAT LOSS //";
 	if (category === "gm") category_text = "// COMMAND TERMINATED //";
-
 	document.getElementById("game-over-category").textContent = category_text;
-	document.getElementById("game-over-title").textContent =
-		`GUILDMASTER ${GameState.guildmaster_name} — DECEASED`;
+	document.getElementById("game-over-title").textContent = `GUILDMASTER ${GameState.guildmaster_name} — DECEASED`;
 	document.getElementById("game-over-reason").textContent = reason;
 	document.getElementById("game-over-epitaph").textContent = `"${epitaph}"`;
-
 	const stats = document.getElementById("game-over-stats");
 	stats.innerHTML = `
 		<div class="stat-item"><div class="stat-label">CYCLES SERVED</div><div class="stat-value">${GameState.cycle}</div></div>
 		<div class="stat-item"><div class="stat-label">FINAL CREW</div><div class="stat-value">${GameState.crew_total.toLocaleString()}</div></div>
 	`;
-
 	document.getElementById("app").style.display = "none";
 	screen.style.display = "flex";
 }
@@ -1130,17 +942,14 @@ function on_advance() {
 	GameState.advance_cycle();
 	if (GameState.game_active) refresh_all();
 }
-
 function on_sector_click(sector_key) {
 	GameState.active_sector = sector_key;
 	refresh_all();
 }
-
 function on_sector_event(event_id) {
 	SectorEventManager.execute(event_id);
 	refresh_all();
 }
-
 function on_start() {
 	const name = document.getElementById("gm-name-input").value.trim() || "UNKNOWN";
 	GameState.new_game(name.toUpperCase());
@@ -1148,7 +957,6 @@ function on_start() {
 	document.getElementById("app").style.display = "grid";
 	refresh_all();
 }
-
 function on_restart() { location.reload(); }
 
 // ============================================================
@@ -1156,11 +964,9 @@ function on_restart() { location.reload(); }
 // ============================================================
 function init() {
 	console.log("Guildmaster booting...");
-
 	document.getElementById("start-btn").addEventListener("click", on_start);
 	document.getElementById("restart-btn").addEventListener("click", on_restart);
 	document.getElementById("advance-btn").addEventListener("click", on_advance);
-
 	document.querySelectorAll(".sector-btn").forEach(btn => {
 		btn.addEventListener("click", () => on_sector_click(btn.dataset.sector));
 	});
