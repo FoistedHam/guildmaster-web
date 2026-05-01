@@ -7,7 +7,17 @@
 	<link rel="stylesheet" href="styles.css">
 </head>
 <body>
-	<div id="app">
+	<div id="welcome-screen">
+		<div class="welcome-box">
+			<h1>GUILDMASTER</h1>
+			<p class="subtitle">PERIPHERY-9 // YEAR 2847 // PERMADEATH ENABLED</p>
+			<p class="flavor">They gave you a dying station and called it a promotion.<br>Your predecessor's name was scrubbed from the records.<br>Do not ask why.</p>
+			<input type="text" id="gm-name-input" placeholder="ENTER YOUR NAME" maxlength="24">
+			<button id="start-btn">ASSUME COMMAND</button>
+		</div>
+	</div>
+
+	<div id="app" style="display:none;">
 		<header id="header">
 			<div class="header-row">
 				<span id="station-name">STATION PERIPHERY-9 // COMMAND DECK</span>
@@ -45,6 +55,18 @@
 			<button id="advance-btn">ADVANCE CYCLE</button>
 		</aside>
 	</div>
+
+	<div id="game-over-screen" style="display:none;">
+		<div class="welcome-box">
+			<h2 id="game-over-category">// STATION LOST //</h2>
+			<h1 id="game-over-title">GUILDMASTER DECEASED</h1>
+			<p id="game-over-reason"></p>
+			<p id="game-over-epitaph" class="flavor"></p>
+			<div id="game-over-stats"></div>
+			<button id="restart-btn">ACCEPT FAILURE — BEGIN AGAIN</button>
+		</div>
+	</div>
+
 	<script src="main.js"></script>
 </body>
 </html>
