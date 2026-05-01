@@ -129,9 +129,9 @@ const GameState = {
 			const r = this.resources[key];
 			r.value = Math.max(0, r.value + r.delta);
 		}
-		SectorEventManager.tick();
-		this.log_event("CYCLE", `Cycle ${this.cycle} begins.`, "info");
-		this._check_loss();
+		SectorEventManager.reset();
+		ThreatManager.reset();
+		this.log_event("CYCLE", `Guildmaster ${this.guildmaster_name} assumes command.`, "info");
 	},
 
 	_check_loss() {
@@ -750,12 +750,38 @@ function refresh_advance_btn() {
 }
 
 function refresh_all() {
-	refresh_header();
-	refresh_resources();
-	refresh_log();
-	refresh_content();
-	refresh_sector_nav();
-	refresh_advance_btn();
+function refresh_threats() {
+	const panel = document.getElementById("threat-panel");
+	if (!panel) return;
+	let html = "<h3>ACTIVE THREATS</h3>";
+	if (ThreatManager.active_threats.length === 0) {
+		html += '<p style="font-size:11px; color:var(--text-mid);">No active threats.</p>';
+	} else {
+		ThreatManager.active_threats.forEach((threat, i) => {
+			html += `<div class="threat-card">`;
+			html += `<div class="threat-name">${threat.name}</div>`;
+			html += `<div class="threat-desc">${threat.desc}</div>`;
+			threat.responses.forEach((resp, ri) => {
+				const cost_parts = [];
+				for (const key in resp.cost) {
+					cost_parts.push(`${resp.cost[key]} ${key}`);
+				}
+				const cost_str = cost_parts.length > 0 ? ` (${cost_parts.join(", ")})` : "";
+				const chance_str = resp.success_chance < 1 ? ` [${Math.floor(resp.success_chance * 100)}%]` : "";
+				html += `<button class="threat-response-btn" data-threat="${i}" data-response="${ri}">${resp.label}${cost_str}${chance_str}</button>`;
+			});
+			html += `</div>`;
+		});
+	}
+	panel.innerHTML = html;
+
+	panel.querySelectorAll(".threat-response-btn").forEach(btn => {
+		btn.addEventListener("click", () => {
+			ThreatManager.respond(parseInt(btn.dataset.threat), parseInt(btn.dataset.response));
+			refresh_all();
+		});
+	});
+}
 }
 
 // ============================================================
