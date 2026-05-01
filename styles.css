@@ -428,4 +428,55 @@ body {
 		border-top: none;
 		border-left: 1px solid var(--border-mid);
 	}
-	}
+	.event-btn {
+	display: block;
+	width: 100%;
+	background: var(--bg-card);
+	color: var(--text-bright);
+	border: 1px solid var(--border-dim);
+	padding: 12px;
+	margin-bottom: 8px;
+	font-family: inherit;
+	cursor: pointer;
+	text-align: left;
+	transition: all 0.15s;
+}
+
+.event-btn:hover, .event-btn:active {
+	background: var(--bg-hover);
+	border-color: var(--border-bright);
+}
+
+.event-btn:disabled {
+	cursor: not-allowed;
+	opacity: 0.5;
+}
+
+.event-btn.cooldown {
+	color: var(--text-dim);
+	border-color: var(--border-dim);
+}
+
+.event-btn.unaffordable {
+	color: var(--accent-rust);
+	border-color: rgba(191, 56, 43, 0.3);
+}
+
+.event-name {
+	font-size: 13px;
+	letter-spacing: 1px;
+	margin-bottom: 4px;
+}
+
+.event-desc {
+	font-size: 11px;
+	color: var(--text-mid);
+	margin-bottom: 4px;
+}
+
+.event-flavor {
+	font-size: 10px;
+	color: var(--text-dim);
+	font-style: italic;
+}
+}
