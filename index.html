@@ -8,8 +8,40 @@
 </head>
 <body>
 	<div id="app">
-		<h1>GUILDMASTER</h1>
-		<p>Periphery-9 // Year 2847</p>
+		<header id="header">
+			<div class="header-row">
+				<span id="station-name">STATION PERIPHERY-9 // COMMAND DECK</span>
+				<span id="cycle-display">CYCLE 001</span>
+			</div>
+			<div class="header-row">
+				<span id="gm-name">GUILDMASTER: UNKNOWN</span>
+				<span id="status-line">MORALE: NOMINAL // THREAT: LOW</span>
+			</div>
+		</header>
+
+		<nav id="sector-nav">
+			<button class="sector-btn">TRAVEL</button>
+			<button class="sector-btn">TRADE</button>
+			<button class="sector-btn">EXPLORATION</button>
+			<button class="sector-btn">SECURITY</button>
+			<button class="sector-btn">POLITICS</button>
+			<button class="sector-btn">LABOR</button>
+			<button class="sector-btn">ENGINEERING</button>
+			<button class="sector-btn">MEDICAL</button>
+		</nav>
+
+		<main id="content">
+			<h2>SECTOR CONTENT</h2>
+			<p>Sector content will load here.</p>
+		</main>
+
+		<aside id="right-panel">
+			<div id="cycle-log">
+				<h3>CYCLE LOG</h3>
+				<p>Awaiting events...</p>
+			</div>
+			<button id="advance-btn">ADVANCE CYCLE</button>
+		</aside>
 	</div>
 	<script src="main.js"></script>
 </body>
