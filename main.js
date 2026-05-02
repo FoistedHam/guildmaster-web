@@ -93,6 +93,7 @@ const GameState = {
 		},
 	},
 
+	black_market_unlocked: false,
 	active_sector: "travel",
 	event_log: [],
 
@@ -116,11 +117,15 @@ const GameState = {
 		this.gm_political_heat = 0.0;
 		this.gm_personal_threat = 0.0;
 		this.gm_imprisoned = false;
+		this.black_market_unlocked = false;
 		this.event_log = [];
 		this.active_sector = "travel";
 		SectorEventManager.reset();
 		ThreatManager.reset();
 		PerilManager.reset();
+		EconomyManager.reset();
+		BlackMarketManager.reset();
+		WorkforceManager.reset();
 		this.log_event("CYCLE", `Guildmaster ${this.guildmaster_name} assumes command.`, "info");
 	},
 
@@ -131,6 +136,9 @@ const GameState = {
 			const r = this.resources[key];
 			r.value = Math.max(0, r.value + r.delta);
 		}
+		EconomyManager.tick(this.cycle);
+		BlackMarketManager.tick();
+		WorkforceManager.tick();
 		SectorEventManager.tick();
 		ThreatManager.tick();
 		PerilManager.tick(this.cycle);
@@ -185,23 +193,14 @@ const GameState = {
 	apply_effects(effects) {
 		for (const key in effects) {
 			const val = effects[key];
-			if (this.resources[key]) {
-				this.modify_resource(key, val);
-			} else if (key === "crew_total") {
-				this.crew_total = Math.max(0, this.crew_total + val);
-			} else if (key === "morale") {
-				this.morale = Math.max(0, Math.min(1, this.morale + val));
-			} else if (key === "threat_level") {
-				this.threat_level = Math.max(0, Math.min(1, this.threat_level + val));
-			} else if (key === "station_hull") {
-				this.station_hull = Math.max(0, Math.min(1, this.station_hull + val));
-			} else if (key === "hull_integrity") {
-				this.hull_integrity = Math.max(0, Math.min(1, this.hull_integrity + val));
-			} else if (key === "gm_political_heat") {
-				this.gm_political_heat = Math.max(0, Math.min(1, this.gm_political_heat + val));
-			} else if (key === "gm_personal_threat") {
-				this.gm_personal_threat = Math.max(0, Math.min(1, this.gm_personal_threat + val));
-			}
+			if (this.resources[key]) this.modify_resource(key, val);
+			else if (key === "crew_total") this.crew_total = Math.max(0, this.crew_total + val);
+			else if (key === "morale") this.morale = Math.max(0, Math.min(1, this.morale + val));
+			else if (key === "threat_level") this.threat_level = Math.max(0, Math.min(1, this.threat_level + val));
+			else if (key === "station_hull") this.station_hull = Math.max(0, Math.min(1, this.station_hull + val));
+			else if (key === "hull_integrity") this.hull_integrity = Math.max(0, Math.min(1, this.hull_integrity + val));
+			else if (key === "gm_political_heat") this.gm_political_heat = Math.max(0, Math.min(1, this.gm_political_heat + val));
+			else if (key === "gm_personal_threat") this.gm_personal_threat = Math.max(0, Math.min(1, this.gm_personal_threat + val));
 		}
 	},
 
@@ -222,6 +221,453 @@ const GameState = {
 		if (this.threat_level < 0.6) return "ELEVATED";
 		if (this.threat_level < 0.85) return "HIGH";
 		return "CRITICAL";
+	},
+};
+
+// ============================================================
+// WORKFORCE MANAGER
+// ============================================================
+const WorkforceManager = {
+	specialists: {},
+	used_names: [],
+
+	RANK_SPECIALIST: 0,
+	RANK_SENIOR: 1,
+	RANK_CHIEF: 2,
+
+	RANK_NAMES: { 0: "SPECIALIST", 1: "SENIOR SPECIALIST", 2: "SECTOR CHIEF" },
+	RANK_CLASS: { 0: "specialist", 1: "senior", 2: "chief" },
+
+	XP_TO_SENIOR: 100,
+	XP_TO_CHIEF: 300,
+
+	XP_PER_CYCLE_BASE: 2,
+	XP_ON_EVENT_USE: 8,
+	XP_ON_PERIL_USE: 15,
+
+	COST_TO_SPECIALIST: 2000,
+	COST_TO_SENIOR: 15000,
+	COST_TO_CHIEF: 40000,
+
+	LABOR_DISCOUNT: { 0: 0.10, 1: 0.15, 2: 0.25 },
+
+	NAME_POOL: ["VOSS", "CHEN", "REYES", "OKAFOR", "HALVORSEN", "PETROV", "NAKAMURA", "SINGH",
+				"MBEKI", "DRAGOMIR", "FERRARA", "KOWALSKI", "ASHFORD", "YILMAZ", "BRENNAN",
+				"SATO", "ODUYA", "LINDQVIST", "HASSAN", "MARCHETTI"],
+
+	tick() {
+		const xp_mult = 1.0 + (GameState.threat_level * 2.0);
+		for (const sector_key in this.specialists) {
+			const s = this.specialists[sector_key];
+			if (!s.alive) continue;
+			if (s.injured_cycles > 0) {
+				s.injured_cycles--;
+				if (s.injured_cycles === 0) {
+					GameState.log_event("WORKFORCE", `${s.name} recovered.`, "info");
+				}
+				continue;
+			}
+			const xp_gain = Math.floor(this.XP_PER_CYCLE_BASE * xp_mult);
+			this._add_xp(sector_key, xp_gain);
+			this._apply_buff(sector_key);
+		}
+	},
+
+	_apply_buff(sector_key) {
+		const s = this.specialists[sector_key];
+		if (!s.alive || s.injured_cycles > 0) return;
+		const buffs = {
+			0: { morale: 0.005, threat_level: -0.005 },
+			1: { morale: 0.010, threat_level: -0.010 },
+			2: { morale: 0.015, threat_level: -0.015 },
+		};
+		GameState.apply_effects(buffs[s.rank]);
+	},
+
+	_add_xp(sector_key, amount) {
+		const s = this.specialists[sector_key];
+		if (!s || !s.alive || s.injured_cycles > 0) return;
+		s.xp += amount;
+	},
+
+	get_promotion_cost(sector_key) {
+		let base = this.COST_TO_SPECIALIST;
+		if (this.specialists[sector_key]) {
+			const s = this.specialists[sector_key];
+			if (s.rank === this.RANK_SPECIALIST) base = this.COST_TO_SENIOR;
+			else if (s.rank === this.RANK_SENIOR) base = this.COST_TO_CHIEF;
+			else return 0;
+		}
+		let discount = 0;
+		if (this.has_active_specialist("labor_affairs")) {
+			const labor_rank = this.specialists["labor_affairs"].rank;
+			discount = this.LABOR_DISCOUNT[labor_rank];
+		}
+		return Math.floor(base * (1 - discount));
+	},
+
+	can_promote(sector_key) {
+		if (this.specialists[sector_key]) {
+			const s = this.specialists[sector_key];
+			if (!s.alive) return false;
+			if (s.injured_cycles > 0) return false;
+			if (s.rank === this.RANK_CHIEF) return false;
+		}
+		if (GameState.crew_total < 100) return false;
+		const cost = this.get_promotion_cost(sector_key);
+		if (GameState.get_resource("credits") < cost) return false;
+		return true;
+	},
+
+	promote(sector_key) {
+		if (!this.can_promote(sector_key)) return false;
+		const cost = this.get_promotion_cost(sector_key);
+		GameState.modify_resource("credits", -cost);
+
+		if (this.specialists[sector_key]) {
+			const s = this.specialists[sector_key];
+			s.rank++;
+			GameState.log_event("WORKFORCE", `${s.name} promoted to ${this.RANK_NAMES[s.rank]}. Cost: ${cost} CR.`, "info");
+			return true;
+		}
+
+		const name = this._generate_name();
+		this.specialists[sector_key] = {
+			name: name,
+			sector: sector_key,
+			rank: this.RANK_SPECIALIST,
+			xp: 0,
+			injured_cycles: 0,
+			alive: true,
+			missions: 0,
+			perils: 0,
+		};
+		GameState.crew_total -= 1;
+		GameState.log_event("WORKFORCE", `${name} promoted to Specialist. Cost: ${cost} CR.`, "info");
+		return true;
+	},
+
+	_generate_name() {
+		const available = this.NAME_POOL.filter(n => !this.used_names.includes(n));
+		if (available.length === 0) return `OPERATIVE-${Math.floor(Math.random() * 999)}`;
+		const chosen = available[Math.floor(Math.random() * available.length)];
+		this.used_names.push(chosen);
+		return chosen;
+	},
+
+	has_active_specialist(sector_key) {
+		const s = this.specialists[sector_key];
+		return s && s.alive && s.injured_cycles === 0;
+	},
+
+	get_xp_progress(sector_key) {
+		const s = this.specialists[sector_key];
+		if (!s) return null;
+		let next = this.XP_TO_SENIOR;
+		if (s.rank === this.RANK_SENIOR) next = this.XP_TO_CHIEF;
+		else if (s.rank === this.RANK_CHIEF) next = this.XP_TO_CHIEF;
+		return { xp: s.xp, next: next, rank: s.rank };
+	},
+
+	on_event_used(sector_key) {
+		if (this.has_active_specialist(sector_key)) {
+			this._add_xp(sector_key, this.XP_ON_EVENT_USE);
+			this.specialists[sector_key].missions++;
+		}
+	},
+
+	reset() {
+		this.specialists = {};
+		this.used_names = [];
+	},
+};
+
+// ============================================================
+// ECONOMY MANAGER
+// ============================================================
+const EconomyManager = {
+	BASE_PRICES: { fuel: 8, food: 1, munitions: 12, parts: 10, medicine: 20 },
+	prices: { fuel: 8, food: 1, munitions: 12, parts: 10, medicine: 20 },
+	price_trend: { fuel: "steady", food: "steady", munitions: "steady", parts: "steady", medicine: "steady" },
+	import_offers: [],
+	delivery_queue: [],
+	export_offers: [],
+	offer_refresh_countdown: 3,
+	trade_vessel: null,
+	vessel_countdown: 8,
+
+	VESSEL_ITEMS: [
+		{ name: "Bootleg Fuel Cells", desc: "Sketchy supplier offers cheap fuel.", flavor: "Smells off. Probably fine.",
+		  cost: 6000, success_chance: 0.75, success: { fuel: 1500 }, fail: { credits: -2000 } },
+		{ name: "Refurbished Med-Stims", desc: "Recovered from a derelict med ship.", flavor: "Expiry date scratched off.",
+		  cost: 8000, success_chance: 0.7, success: { medicine: 600 }, fail: { medicine: 200, morale: -0.03 } },
+		{ name: "Salvaged Hull Plating", desc: "Old plating from a decommissioned hauler.", flavor: "Some of these have weld marks.",
+		  cost: 10000, success_chance: 0.8, success: { parts: 800 }, fail: { parts: 300 } },
+		{ name: "Mystery Cargo", desc: "Sealed container. Seller will not open.", flavor: "What could go wrong.",
+		  cost: 5000, success_chance: 0.5, success: { credits: 12000 }, fail: { morale: -0.05 } },
+	],
+
+	tick(cycle) {
+		this._update_prices();
+		this.offer_refresh_countdown--;
+		if (this.offer_refresh_countdown <= 0) {
+			this._refresh_offers();
+			this.offer_refresh_countdown = 3;
+		}
+		this._tick_deliveries();
+		this.vessel_countdown--;
+		if (this.trade_vessel) {
+			this.trade_vessel.cycles_docked--;
+			if (this.trade_vessel.cycles_docked <= 0) {
+				GameState.log_event("TRADE", `Vessel ${this.trade_vessel.name} departed.`, "info");
+				this.trade_vessel = null;
+				this.vessel_countdown = 6 + Math.floor(Math.random() * 6);
+			}
+		} else if (this.vessel_countdown <= 0) {
+			this._spawn_vessel();
+		}
+	},
+
+	_update_prices() {
+		for (const key in this.BASE_PRICES) {
+			const old_price = this.prices[key];
+			const fluctuation = (Math.random() - 0.5) * 0.3;
+			const new_price = Math.max(1, Math.floor(this.BASE_PRICES[key] * (1 + fluctuation)));
+			if (new_price > old_price) this.price_trend[key] = "rising";
+			else if (new_price < old_price) this.price_trend[key] = "falling";
+			else this.price_trend[key] = "steady";
+			this.prices[key] = new_price;
+		}
+	},
+
+	_refresh_offers() {
+		this.import_offers = [];
+		const resource_types = ["fuel", "food", "munitions", "parts", "medicine"];
+		for (let i = 0; i < 3; i++) {
+			const res = resource_types[Math.floor(Math.random() * resource_types.length)];
+			const amount = 500 + Math.floor(Math.random() * 1500);
+			const bulk = amount > 1500;
+			let cost = amount * this.prices[res];
+			if (bulk) cost = Math.floor(cost * 0.85);
+			const delivery = 3 + Math.floor(Math.random() * 6);
+			this.import_offers.push({
+				resource: res, amount: amount, total_cost: cost,
+				delivery_cycles: delivery, bulk_discount: bulk,
+			});
+		}
+		this.export_offers = [];
+		for (const key in this.BASE_PRICES) {
+			const stock = GameState.get_resource(key);
+			if (stock < 500) continue;
+			const max_amount = Math.floor(stock * 0.4);
+			const markup = 1.1 + Math.random() * 0.25;
+			const price_per_unit = Math.floor(this.prices[key] * markup);
+			this.export_offers.push({
+				resource: key, max_amount: max_amount, price_per_unit: price_per_unit,
+			});
+		}
+	},
+
+	_tick_deliveries() {
+		for (let i = this.delivery_queue.length - 1; i >= 0; i--) {
+			const order = this.delivery_queue[i];
+			order.cycles_remaining--;
+			if (order.cycles_remaining <= 0) {
+				GameState.modify_resource(order.resource, order.amount);
+				GameState.log_event("TRADE", `Delivery: ${order.amount} ${order.resource}.`, "info");
+				this.delivery_queue.splice(i, 1);
+			}
+		}
+	},
+
+	_spawn_vessel() {
+		const stock = [];
+		const pool = [...this.VESSEL_ITEMS];
+		for (let i = 0; i < 4 && pool.length > 0; i++) {
+			const idx = Math.floor(Math.random() * pool.length);
+			stock.push(pool.splice(idx, 1)[0]);
+		}
+		this.trade_vessel = {
+			name: ["BLACKWATER", "GHOST FREIGHTER", "OUTRIDER-7", "VAGRANT MAJESTY"][Math.floor(Math.random() * 4)],
+			stock: stock,
+			cycles_docked: 1,
+		};
+		GameState.log_event("TRADE", `Trade vessel ${this.trade_vessel.name} docked.`, "info");
+	},
+
+	purchase_import(offer_index) {
+		const offer = this.import_offers[offer_index];
+		if (!offer) return;
+		if (GameState.get_resource("credits") < offer.total_cost) {
+			GameState.log_event("TRADE", "Insufficient credits.", "warning");
+			return;
+		}
+		GameState.modify_resource("credits", -offer.total_cost);
+		this.delivery_queue.push({
+			resource: offer.resource, amount: offer.amount, cycles_remaining: offer.delivery_cycles,
+		});
+		this.import_offers.splice(offer_index, 1);
+		GameState.log_event("TRADE", `Ordered ${offer.amount} ${offer.resource}. ETA: ${offer.delivery_cycles} cycles.`, "info");
+	},
+
+	sell_export(resource_key, amount) {
+		if (GameState.get_resource(resource_key) < amount) return;
+		const offer = this.export_offers.find(o => o.resource === resource_key);
+		if (!offer) return;
+		const total = amount * offer.price_per_unit;
+		GameState.modify_resource(resource_key, -amount);
+		GameState.modify_resource("credits", total);
+		GameState.log_event("TRADE", `Sold ${amount} ${resource_key} for ${total} CR.`, "info");
+	},
+
+	purchase_vessel_item(item_index) {
+		if (!this.trade_vessel) return;
+		const item = this.trade_vessel.stock[item_index];
+		if (!item) return;
+		if (GameState.get_resource("credits") < item.cost) {
+			GameState.log_event("TRADE", "Insufficient credits.", "warning");
+			return;
+		}
+		GameState.modify_resource("credits", -item.cost);
+		if (Math.random() <= item.success_chance) {
+			GameState.apply_effects(item.success);
+			GameState.log_event("TRADE", `${item.name}: deal paid off.`, "info");
+		} else {
+			GameState.apply_effects(item.fail);
+			GameState.log_event("TRADE", `${item.name}: deal went badly.`, "warning");
+		}
+		this.trade_vessel.stock.splice(item_index, 1);
+	},
+
+	get_price_trend(resource_key) {
+		return this.price_trend[resource_key] || "steady";
+	},
+
+	reset() {
+		this.prices = { ...this.BASE_PRICES };
+		this.price_trend = { fuel: "steady", food: "steady", munitions: "steady", parts: "steady", medicine: "steady" };
+		this.import_offers = [];
+		this.delivery_queue = [];
+		this.export_offers = [];
+		this.offer_refresh_countdown = 3;
+		this.trade_vessel = null;
+		this.vessel_countdown = 8;
+		this._refresh_offers();
+	},
+};
+
+// ============================================================
+// BLACK MARKET MANAGER
+// ============================================================
+const BlackMarketManager = {
+	stock: [],
+	stock_refresh_countdown: 4,
+	active_addictions: [],
+
+	ITEMS: [
+		{ id: "combat_stims", name: "Combat Stims", cost: 8000,
+		  desc: "Performance enhancers. Boost morale temporarily.", flavor: "Banned in 12 systems.",
+		  effects: { morale: 0.12 },
+		  heat_cost: { gm_personal_threat: 0.05, gm_political_heat: 0.03 },
+		  addiction_chance: 0.25, addiction_drain: -0.02 },
+		{ id: "pleasure_goods", name: "Pleasure Goods", cost: 6000,
+		  desc: "Distractions for the masses. Big morale boost.", flavor: "Discreetly distributed.",
+		  effects: { morale: 0.18 },
+		  heat_cost: { gm_political_heat: 0.05 },
+		  addiction_chance: 0.30, addiction_drain: -0.03 },
+		{ id: "illegal_weapons", name: "Black Market Weapons", cost: 12000,
+		  desc: "Unregistered firearms. Reduces threat level.", flavor: "No serial numbers. No questions.",
+		  effects: { munitions: 800, threat_level: -0.08 },
+		  heat_cost: { gm_personal_threat: 0.08, gm_political_heat: 0.05 },
+		  addiction_chance: 0.0 },
+		{ id: "forged_documents", name: "Forged Documents", cost: 10000,
+		  desc: "Clean paperwork for dirty deals. Reduces political heat.", flavor: "Indistinguishable from genuine.",
+		  effects: { gm_political_heat: -0.15 },
+		  heat_cost: { gm_personal_threat: 0.06 },
+		  addiction_chance: 0.0 },
+		{ id: "intel_dossier", name: "Guild Intel Dossier", cost: 18000,
+		  desc: "Confidential Guild documents. Very risky.", flavor: "If they find this, you are finished.",
+		  effects: { gm_political_heat: -0.2, threat_level: -0.05 },
+		  heat_cost: { gm_personal_threat: 0.15, gm_political_heat: 0.1 },
+		  addiction_chance: 0.0 },
+		{ id: "smuggled_meds", name: "Smuggled Pharma", cost: 7000,
+		  desc: "Restricted medical compounds.", flavor: "Officially does not exist.",
+		  effects: { medicine: 600, morale: 0.04 },
+		  heat_cost: { gm_personal_threat: 0.03, gm_political_heat: 0.02 },
+		  addiction_chance: 0.10, addiction_drain: -0.015 },
+		{ id: "rebel_propaganda", name: "Rebel Literature", cost: 4000,
+		  desc: "Anti-Guild manifestos. Risky for morale.", flavor: "Reading material for desperate times.",
+		  effects: { morale: 0.06, gm_political_heat: 0.08 },
+		  heat_cost: { gm_personal_threat: 0.04 },
+		  addiction_chance: 0.0 },
+		{ id: "shadow_credits", name: "Shadow Credit Stash", cost: 5000,
+		  desc: "Untraceable credits. Net positive but heat-generating.", flavor: "These never existed.",
+		  effects: { credits: 12000 },
+		  heat_cost: { gm_personal_threat: 0.06, gm_political_heat: 0.06 },
+		  addiction_chance: 0.0 },
+	],
+
+	tick() {
+		if (!GameState.black_market_unlocked) return;
+		this.stock_refresh_countdown--;
+		if (this.stock_refresh_countdown <= 0) {
+			this._refresh_stock();
+			this.stock_refresh_countdown = 4;
+		}
+		// Tick addictions
+		for (let i = this.active_addictions.length - 1; i >= 0; i--) {
+			const a = this.active_addictions[i];
+			a.cycles_remaining--;
+			GameState.morale = Math.max(0, GameState.morale + a.drain);
+			if (a.cycles_remaining <= 0) {
+				GameState.log_event("BLACK MARKET", `Addiction to ${a.name} subsided.`, "info");
+				this.active_addictions.splice(i, 1);
+			}
+		}
+	},
+
+	unlock() {
+		GameState.black_market_unlocked = true;
+		this._refresh_stock();
+		GameState.log_event("BLACK MARKET", "Underground contacts established.", "info");
+	},
+
+	_refresh_stock() {
+		this.stock = [];
+		const pool = [...this.ITEMS];
+		for (let i = 0; i < 5 && pool.length > 0; i++) {
+			const idx = Math.floor(Math.random() * pool.length);
+			this.stock.push(pool.splice(idx, 1)[0]);
+		}
+	},
+
+	purchase(item_index) {
+		const item = this.stock[item_index];
+		if (!item) return;
+		if (GameState.get_resource("credits") < item.cost) {
+			GameState.log_event("BLACK MARKET", "Insufficient credits.", "warning");
+			return;
+		}
+		GameState.modify_resource("credits", -item.cost);
+		GameState.apply_effects(item.effects);
+		GameState.apply_effects(item.heat_cost);
+		// Roll addiction
+		if (item.addiction_chance > 0 && Math.random() < item.addiction_chance) {
+			this.active_addictions.push({
+				name: item.name,
+				drain: item.addiction_drain,
+				cycles_remaining: 8 + Math.floor(Math.random() * 8),
+			});
+			GameState.log_event("BLACK MARKET", `Crew addiction developed: ${item.name}.`, "warning");
+		}
+		GameState.log_event("BLACK MARKET", `Acquired: ${item.name}.`, "info");
+		this.stock.splice(item_index, 1);
+	},
+
+	reset() {
+		this.stock = [];
+		this.stock_refresh_countdown = 4;
+		this.active_addictions = [];
 	},
 };
 
@@ -254,6 +700,14 @@ const PerilManager = {
 				  result: "They were bluffing. Lucky.",
 				  result_fail: "Severe hull damage. Mass casualties." },
 			],
+			specialist_choice: {
+				text: "Specialist coordinates countermeasures.", cost_desc: "800 munitions — 90%",
+				cost: { munitions: -800 }, effects: { munitions: -800 }, success_chance: 0.9,
+				success_effects: { threat_level: -0.1, morale: 0.03 },
+				fail_effects: { station_hull: -0.08 },
+				result: "Specialist-led defense was decisive.",
+				result_fail: "Specialist could not prevent some damage.",
+			},
 		},
 		hull_breach: {
 			id: "hull_breach", category: "combat", sector: "engineering",
@@ -271,6 +725,11 @@ const PerilManager = {
 				  cost: {}, effects: { crew_total: -800, morale: -0.12 },
 				  result: "Sector sealed. Crew inside lost. Station intact." },
 			],
+			specialist_choice: {
+				text: "Specialist leads emergency repair.", cost_desc: "200 parts — guaranteed",
+				cost: { parts: -200 }, effects: { parts: -200, hull_integrity: 0.05 },
+				result: "Specialist contained the breach in record time.",
+			},
 		},
 		assassination_attempt: {
 			id: "assassination_attempt", category: "gm", sector: "security_intel",
@@ -280,12 +739,12 @@ const PerilManager = {
 			choices: [
 				{ label: "SAFE", text: "Increase security. Full lockdown.", cost_desc: "20,000 CR",
 				  cost: { credits: -20000 }, effects: { credits: -20000, gm_personal_threat: -0.2 },
-				  result: "Security tightened. Threat reduced." },
+				  result: "Security tightened." },
 				{ label: "MODERATE", text: "Internal investigation.", cost_desc: "10,000 CR — 65%",
 				  cost: { credits: -10000 }, effects: { credits: -10000 }, success_chance: 0.65,
 				  success_effects: { gm_personal_threat: -0.3, gm_political_heat: -0.1 },
 				  fail_effects: { gm_personal_threat: 0.1 },
-				  result: "Plot uncovered. Conspirators arrested.",
+				  result: "Plot uncovered.",
 				  result_fail: "Investigation found nothing." },
 				{ label: "RISKY", text: "Publicly accuse a rival faction.", cost_desc: "Political risk",
 				  cost: {}, effects: { gm_political_heat: 0.2 }, success_chance: 0.5,
@@ -294,6 +753,11 @@ const PerilManager = {
 				  result: "Accusation landed.",
 				  result_fail: "Accusation backfired." },
 			],
+			specialist_choice: {
+				text: "Specialist traces the operative's origin.", cost_desc: "5,000 CR — guaranteed",
+				cost: { credits: -5000 }, effects: { credits: -5000, gm_personal_threat: -0.35, gm_political_heat: -0.15 },
+				result: "Specialist identified the faction behind it.",
+			},
 		},
 		guild_tribunal: {
 			id: "guild_tribunal", category: "gm", sector: "politics_info",
@@ -314,9 +778,14 @@ const PerilManager = {
 				  cost: {}, effects: { gm_political_heat: 0.3 }, success_chance: 0.35,
 				  success_effects: { morale: 0.08 },
 				  fail_effects: { gm_political_heat: 0.2, gm_personal_threat: 0.2 },
-				  result: "Autonomy holds. Crew inspired.",
+				  result: "Autonomy holds.",
 				  result_fail: "Refusal escalated." },
 			],
+			specialist_choice: {
+				text: "Specialist prepares legal defense.", cost_desc: "8,000 CR — guaranteed",
+				cost: { credits: -8000 }, effects: { credits: -8000, gm_political_heat: -0.3, morale: 0.04 },
+				result: "Specialist dismantled the tribunal's case.",
+			},
 		},
 		labor_strike: {
 			id: "labor_strike", category: "story", sector: "labor_affairs",
@@ -333,11 +802,16 @@ const PerilManager = {
 				  success_effects: { morale: 0.05 },
 				  fail_effects: { morale: -0.08, crew_total: -400 },
 				  result: "Negotiation worked.",
-				  result_fail: "Strike continues. Workers walking out." },
+				  result_fail: "Strike continues." },
 				{ label: "RISKY", text: "Declare martial law.", cost_desc: "Severe consequences",
 				  cost: {}, effects: { morale: -0.2, gm_political_heat: 0.15, threat_level: 0.1 },
-				  result: "Martial law declared. Work resumes at gunpoint." },
+				  result: "Martial law declared." },
 			],
+			specialist_choice: {
+				text: "Specialist mediates between command and councils.", cost_desc: "6,000 CR — guaranteed",
+				cost: { credits: -6000 }, effects: { credits: -6000, morale: 0.08, threat_level: -0.03 },
+				result: "Specialist brokered a deal.",
+			},
 		},
 		power_grid_failure: {
 			id: "power_grid_failure", category: "sector", sector: "engineering",
@@ -347,14 +821,19 @@ const PerilManager = {
 			choices: [
 				{ label: "SAFE", text: "Full grid restoration.", cost_desc: "600 parts + 10,000 CR",
 				  cost: { parts: -600, credits: -10000 }, effects: { parts: -600, credits: -10000 },
-				  result: "Grid restored. Systems nominal." },
+				  result: "Grid restored." },
 				{ label: "MODERATE", text: "Reroute power.", cost_desc: "200 parts",
 				  cost: { parts: -200 }, effects: { parts: -200, morale: -0.05 },
-				  result: "Power rerouted. Some sectors offline." },
+				  result: "Power rerouted." },
 				{ label: "RISKY", text: "Cannibalize backups.", cost_desc: "Future fragility",
 				  cost: {}, effects: { hull_integrity: -0.1 },
-				  result: "Grid restored. Station more fragile." },
+				  result: "Grid restored. Station fragile." },
 			],
+			specialist_choice: {
+				text: "Specialist reroutes with minimal disruption.", cost_desc: "100 parts",
+				cost: { parts: -100 }, effects: { parts: -100, hull_integrity: 0.03 },
+				result: "Specialist restored full grid quickly.",
+			},
 		},
 		medical_outbreak: {
 			id: "medical_outbreak", category: "sector", sector: "medical",
@@ -365,15 +844,20 @@ const PerilManager = {
 				{ label: "SAFE", text: "Full quarantine and treatment.", cost_desc: "1,500 medicine + 18,000 CR",
 				  cost: { medicine: -1500, credits: -18000 },
 				  effects: { medicine: -1500, credits: -18000 },
-				  result: "Outbreak contained. All treated." },
+				  result: "Outbreak contained." },
 				{ label: "MODERATE", text: "Quarantine. Treat worst cases.", cost_desc: "600 medicine",
 				  cost: { medicine: -600 },
 				  effects: { medicine: -600, crew_total: -200, morale: -0.05 },
 				  result: "Contained. Some casualties." },
 				{ label: "RISKY", text: "Vent the residential block.", cost_desc: "Brutal",
 				  cost: {}, effects: { crew_total: -800, morale: -0.25, gm_political_heat: 0.2 },
-				  result: "Block vented. Outbreak ended. You will stand trial eventually." },
+				  result: "Block vented. Outbreak ended." },
 			],
+			specialist_choice: {
+				text: "Specialist develops rapid treatment.", cost_desc: "300 medicine",
+				cost: { medicine: -300 }, effects: { medicine: -300, morale: 0.04 },
+				result: "Specialist synthesized a treatment. No deaths.",
+			},
 		},
 	},
 
@@ -400,7 +884,7 @@ const PerilManager = {
 			pool.push(id);
 		}
 		if (pool.length === 0) return;
-		const spawn_chance = 0.3 + (GameState.threat_level * 0.4);
+		const spawn_chance = 0.15 + (GameState.threat_level * 0.35);
 		if (Math.random() > spawn_chance) return;
 		const chosen_id = pool[Math.floor(Math.random() * pool.length)];
 		this._spawn(chosen_id);
@@ -424,7 +908,7 @@ const PerilManager = {
 			sector: { hull_integrity: -0.08 },
 		};
 		GameState.apply_effects(penalties[p.category] || {});
-		GameState.log_event("PERIL", `${p.title} — UNRESOLVED. Consequences applied.`, "critical");
+		GameState.log_event("PERIL", `${p.title} — UNRESOLVED.`, "critical");
 		this.active_perils.splice(index, 1);
 	},
 
@@ -437,10 +921,17 @@ const PerilManager = {
 		return true;
 	},
 
+	has_specialist_for(peril) {
+		if (!peril.specialist_choice) return false;
+		return WorkforceManager.has_active_specialist(peril.sector);
+	},
+
 	resolve(peril_index, choice_index) {
 		const p = this.active_perils[peril_index];
 		if (!p) return false;
-		const choice = p.choices[choice_index];
+		let choice;
+		if (choice_index === 3) choice = p.specialist_choice;
+		else choice = p.choices[choice_index];
 		if (!choice) return false;
 		if (!this.can_afford(choice)) {
 			GameState.log_event("PERIL", `Cannot resolve — insufficient resources.`, "warning");
@@ -456,6 +947,9 @@ const PerilManager = {
 				GameState.apply_effects(choice.fail_effects || {});
 				result_text = choice.result_fail;
 			}
+		}
+		if (choice_index === 3) {
+			WorkforceManager._add_xp(p.sector, WorkforceManager.XP_ON_PERIL_USE);
 		}
 		GameState.log_event("PERIL", `${p.title} — ${result_text}`, "warning");
 		this.active_perils.splice(peril_index, 1);
@@ -492,8 +986,18 @@ function show_peril_modal(peril, peril_index) {
 			<div class="peril-choice-cost">${c.cost_desc}</div>
 		</button>`;
 	});
-	choices_div.innerHTML = html;
 
+	if (PerilManager.has_specialist_for(peril)) {
+		const spec = peril.specialist_choice;
+		const sp_name = WorkforceManager.specialists[peril.sector].name;
+		html += `<button class="peril-choice-btn specialist" data-choice="3">
+			<div class="peril-choice-label">[SPECIALIST: ${sp_name}]</div>
+			<div class="peril-choice-text">${spec.text}</div>
+			<div class="peril-choice-cost">${spec.cost_desc}</div>
+		</button>`;
+	}
+
+	choices_div.innerHTML = html;
 	choices_div.querySelectorAll(".peril-choice-btn").forEach(btn => {
 		btn.addEventListener("click", () => {
 			const idx = parseInt(btn.dataset.choice);
@@ -561,9 +1065,7 @@ const ThreatManager = {
 	},
 
 	tick() {
-		for (const t of this.active_threats) {
-			GameState.apply_effects(t.tick_effects);
-		}
+		for (const t of this.active_threats) GameState.apply_effects(t.tick_effects);
 		this.roll_spawn();
 	},
 
@@ -602,9 +1104,7 @@ const ThreatManager = {
 		}
 	},
 
-	reset() {
-		this.active_threats = [];
-	},
+	reset() { this.active_threats = []; },
 };
 
 // ============================================================
@@ -738,6 +1238,7 @@ const SectorEventManager = {
 			return;
 		}
 		GameState.apply_effects(ev.effects);
+		WorkforceManager.on_event_used(ev.sector);
 		GameState.log_event(ev.sector.toUpperCase(), ev.result, "info");
 		this.cooldowns[event_id] = ev.cooldown;
 	},
@@ -794,16 +1295,37 @@ function refresh_log() {
 
 function refresh_content() {
 	const content = document.getElementById("content");
-	const sector = GameState.sectors[GameState.active_sector];
+	const sector_key = GameState.active_sector;
+	const sector = GameState.sectors[sector_key];
+
 	let html = `<h2>${sector.name.toUpperCase()}</h2>`;
 	html += `<p style="color: var(--text-mid); font-size:12px;">STATUS: ${sector.status.toUpperCase()} // CREW: ${sector.crew_assigned} / ${sector.crew_min}</p>`;
+
+	// Specialist banner
+	if (WorkforceManager.has_active_specialist(sector_key)) {
+		const s = WorkforceManager.specialists[sector_key];
+		const rank_name = WorkforceManager.RANK_NAMES[s.rank];
+		const rank_class = WorkforceManager.RANK_CLASS[s.rank];
+		html += `<p style="margin: 8px 0; font-size: 12px;"><span style="color: var(--accent-ice);">${s.name}</span> <span class="workforce-rank ${rank_class}">[${rank_name}]</span></p>`;
+	}
+
+	// Sector-specific extra content
+	if (sector_key === "trade_logistics") {
+		html += render_trade_extras();
+	} else if (sector_key === "security_intel") {
+		html += render_security_extras();
+	} else if (sector_key === "labor_affairs") {
+		html += render_labor_extras();
+	}
+
 	html += `<div class="section-title">SUBSECTORS</div>`;
 	for (const sub_key in sector.subsectors) {
 		const sub = sector.subsectors[sub_key];
 		html += `<div class="subsector-row"><span class="subsector-name">${sub.name}</span><span class="subsector-crew">${sub.crew} crew</span><span class="subsector-status ${sub.status}">${sub.status.toUpperCase()}</span></div>`;
 	}
+
 	html += `<div class="section-title">SECTOR EVENTS</div>`;
-	const events = SectorEventManager.get_events_for_sector(GameState.active_sector);
+	const events = SectorEventManager.get_events_for_sector(sector_key);
 	if (events.length === 0) {
 		html += `<p style="color: var(--text-mid); font-size:12px;">No events available.</p>`;
 	} else {
@@ -830,11 +1352,198 @@ function refresh_content() {
 			</button>`;
 		}
 	}
+
 	content.innerHTML = html;
+
 	content.querySelectorAll(".event-btn").forEach(btn => {
 		if (btn.disabled) return;
 		btn.addEventListener("click", () => on_sector_event(btn.dataset.event));
 	});
+
+	wire_sector_extras();
+}
+
+function render_trade_extras() {
+	let html = `<div class="section-title">MARKET PRICES</div>`;
+	html += `<div class="market-grid">`;
+	for (const key of ["fuel", "food", "munitions", "parts", "medicine"]) {
+		const price = EconomyManager.prices[key];
+		const trend = EconomyManager.get_price_trend(key);
+		const arrow = trend === "rising" ? "^" : (trend === "falling" ? "v" : "~");
+		html += `<div class="market-card">
+			<div class="market-label">${key.toUpperCase()}</div>
+			<div class="market-price ${trend}">${price} ${arrow}</div>
+		</div>`;
+	}
+	html += `</div>`;
+
+	html += `<div class="section-title">IMPORTS</div>`;
+	if (EconomyManager.import_offers.length === 0) {
+		html += `<p style="font-size:11px; color:var(--text-mid);">No offers. Refresh in ${EconomyManager.offer_refresh_countdown} cycles.</p>`;
+	} else {
+		EconomyManager.import_offers.forEach((offer, i) => {
+			const bulk_str = offer.bulk_discount ? " [BULK -15%]" : "";
+			html += `<div class="import-offer">
+				<div>
+					<div class="offer-info-name">${offer.resource.toUpperCase()} x${offer.amount}${bulk_str}</div>
+					<div class="offer-info-detail">${offer.total_cost.toLocaleString()} CR // Delivery: ${offer.delivery_cycles}c</div>
+				</div>
+				<button class="offer-btn" data-action="import" data-index="${i}">ORDER</button>
+			</div>`;
+		});
+	}
+
+	if (EconomyManager.delivery_queue.length > 0) {
+		html += `<div class="section-title">IN TRANSIT</div>`;
+		EconomyManager.delivery_queue.forEach(o => {
+			html += `<div class="delivery-row"><span>${o.resource.toUpperCase()} x${o.amount}</span><span>${o.cycles_remaining}c</span></div>`;
+		});
+	}
+
+	html += `<div class="section-title">EXPORTS</div>`;
+	if (EconomyManager.export_offers.length === 0) {
+		html += `<p style="font-size:11px; color:var(--text-mid);">No exports available.</p>`;
+	} else {
+		EconomyManager.export_offers.forEach(offer => {
+			html += `<div class="export-offer">
+				<div>
+					<div class="offer-info-name">${offer.resource.toUpperCase()} // Up to ${offer.max_amount}</div>
+					<div class="offer-info-detail">${offer.price_per_unit} CR/unit (market: ${EconomyManager.prices[offer.resource]} CR)</div>
+				</div>
+				<button class="offer-btn" data-action="export" data-resource="${offer.resource}" data-amount="${offer.max_amount}">SELL MAX</button>
+			</div>`;
+		});
+	}
+
+	html += `<div class="section-title">TRADE VESSEL</div>`;
+	if (!EconomyManager.trade_vessel) {
+		html += `<p style="font-size:11px; color:var(--text-mid);">No vessel docked. Next arrival: ~${EconomyManager.vessel_countdown}c.</p>`;
+	} else {
+		const v = EconomyManager.trade_vessel;
+		html += `<div class="vessel-banner">${v.name} // DEPARTING IN ${v.cycles_docked}c</div>`;
+		v.stock.forEach((item, i) => {
+			html += `<div class="vessel-item">
+				<div>
+					<div class="offer-info-name">${item.name}</div>
+					<div class="offer-info-detail">${item.cost.toLocaleString()} CR // Success: ${Math.floor(item.success_chance * 100)}%</div>
+					<div class="offer-info-flavor">${item.flavor}</div>
+				</div>
+				<button class="offer-btn" data-action="vessel" data-index="${i}">BUY</button>
+			</div>`;
+		});
+	}
+
+	return html;
+}
+
+function render_security_extras() {
+	let html = `<div class="section-title">GUILDMASTER STATUS</div>`;
+	html += `<div class="gm-status-grid">`;
+	const stats = [
+		{ label: "HEALTH", val: GameState.gm_health, good_high: true },
+		{ label: "POLITICAL HEAT", val: GameState.gm_political_heat, good_high: false },
+		{ label: "PERSONAL THREAT", val: GameState.gm_personal_threat, good_high: false },
+	];
+	for (const s of stats) {
+		const pct = Math.floor(s.val * 100);
+		let cls = "good";
+		if (s.good_high) {
+			if (pct < 30) cls = "critical";
+			else if (pct < 60) cls = "warning";
+		} else {
+			if (pct > 70) cls = "critical";
+			else if (pct > 40) cls = "warning";
+		}
+		html += `<div class="gm-stat">
+			<div class="gm-stat-label">${s.label}</div>
+			<div class="gm-stat-value ${cls}">${pct}%</div>
+		</div>`;
+	}
+	html += `</div>`;
+
+	html += `<div class="section-title">BLACK MARKET</div>`;
+	if (!GameState.black_market_unlocked) {
+		html += `<div class="bm-locked">ACCESS DENIED — Establish underground contacts to unlock.</div>`;
+		const can_unlock = GameState.get_resource("credits") >= 15000;
+		html += `<button class="offer-btn" id="unlock-bm-btn" ${can_unlock ? "" : "disabled"} style="width:100%; margin-top:8px;">ESTABLISH CONTACTS [15,000 CR]</button>`;
+	} else {
+		if (BlackMarketManager.active_addictions.length > 0) {
+			html += `<div class="addiction-warning">ACTIVE ADDICTIONS: ${BlackMarketManager.active_addictions.length}<br>`;
+			BlackMarketManager.active_addictions.forEach(a => {
+				html += `${a.name} — ${a.cycles_remaining}c remaining<br>`;
+			});
+			html += `</div>`;
+		}
+		html += `<p style="font-size:10px; color:var(--text-dim); margin-bottom:8px;">Stock refreshes in ${BlackMarketManager.stock_refresh_countdown}c.</p>`;
+		if (BlackMarketManager.stock.length === 0) {
+			html += `<p style="font-size:11px; color:var(--text-mid);">Stock depleted.</p>`;
+		} else {
+			BlackMarketManager.stock.forEach((item, i) => {
+				const heat_parts = [];
+				if (item.heat_cost.gm_personal_threat) heat_parts.push(`Threat +${Math.floor(item.heat_cost.gm_personal_threat * 100)}%`);
+				if (item.heat_cost.gm_political_heat) heat_parts.push(`Heat +${Math.floor(item.heat_cost.gm_political_heat * 100)}%`);
+				if (item.addiction_chance > 0) heat_parts.push(`Addiction: ${Math.floor(item.addiction_chance * 100)}%`);
+				const can_afford = GameState.get_resource("credits") >= item.cost;
+				html += `<div class="bm-item">
+					<div class="bm-item-header">
+						<span class="bm-item-name">${item.name}</span>
+						<span class="bm-item-cost">${item.cost.toLocaleString()} CR</span>
+					</div>
+					<div class="bm-item-desc">${item.desc}</div>
+					<div class="bm-item-flavor">${item.flavor}</div>
+					<div class="bm-item-heat">${heat_parts.join(" // ")}</div>
+					<button class="bm-buy-btn" data-action="bm-buy" data-index="${i}" ${can_afford ? "" : "disabled"}>ACQUIRE</button>
+				</div>`;
+			});
+		}
+	}
+
+	return html;
+}
+
+function render_labor_extras() {
+	let html = `<div class="labor-button-row">
+		<button class="labor-action-btn" id="open-workforce-btn">SPECIALIST PROMOTION</button>
+	</div>`;
+	return html;
+}
+
+function wire_sector_extras() {
+	const content = document.getElementById("content");
+	content.querySelectorAll("[data-action]").forEach(btn => {
+		const action = btn.dataset.action;
+		btn.addEventListener("click", () => {
+			if (action === "import") {
+				EconomyManager.purchase_import(parseInt(btn.dataset.index));
+				refresh_all();
+			} else if (action === "export") {
+				EconomyManager.sell_export(btn.dataset.resource, parseInt(btn.dataset.amount));
+				refresh_all();
+			} else if (action === "vessel") {
+				EconomyManager.purchase_vessel_item(parseInt(btn.dataset.index));
+				refresh_all();
+			} else if (action === "bm-buy") {
+				BlackMarketManager.purchase(parseInt(btn.dataset.index));
+				refresh_all();
+			}
+		});
+	});
+
+	const unlock_btn = document.getElementById("unlock-bm-btn");
+	if (unlock_btn) {
+		unlock_btn.addEventListener("click", () => {
+			if (GameState.get_resource("credits") >= 15000) {
+				GameState.modify_resource("credits", -15000);
+				BlackMarketManager.unlock();
+				refresh_all();
+			}
+		});
+	}
+
+	const wf_btn = document.getElementById("open-workforce-btn");
+	if (wf_btn) {
+		wf_btn.addEventListener("click", show_workforce_modal);
+	}
 }
 
 function refresh_sector_nav() {
@@ -897,6 +1606,67 @@ function refresh_all() {
 	refresh_sector_nav();
 	refresh_advance_btn();
 	refresh_threats();
+}
+
+// ============================================================
+// WORKFORCE MODAL
+// ============================================================
+function show_workforce_modal() {
+	render_workforce_list();
+	document.getElementById("workforce-modal").style.display = "flex";
+}
+
+function render_workforce_list() {
+	const list = document.getElementById("workforce-list");
+	let html = "";
+	for (const sector_key in GameState.sectors) {
+		const sector = GameState.sectors[sector_key];
+		const has_spec = WorkforceManager.has_active_specialist(sector_key);
+		const spec = WorkforceManager.specialists[sector_key];
+		const cost = WorkforceManager.get_promotion_cost(sector_key);
+		const can_promote = WorkforceManager.can_promote(sector_key);
+
+		html += `<div class="workforce-row">`;
+		html += `<div class="workforce-row-header">`;
+		html += `<span class="workforce-sector-name">${sector.name.toUpperCase()}</span>`;
+
+		if (has_spec) {
+			const rank_name = WorkforceManager.RANK_NAMES[spec.rank];
+			const rank_class = WorkforceManager.RANK_CLASS[spec.rank];
+			html += `<span class="workforce-spec-info">${spec.name} <span class="workforce-rank ${rank_class}">[${rank_name}]</span></span>`;
+
+			if (spec.rank === WorkforceManager.RANK_CHIEF) {
+				html += `<button class="workforce-promote-btn maxed" disabled>MAXED</button>`;
+			} else {
+				html += `<button class="workforce-promote-btn" data-sector="${sector_key}" ${can_promote ? "" : "disabled"}>PROMOTE [${cost.toLocaleString()} CR]</button>`;
+			}
+			html += `</div>`;
+
+			const xp_data = WorkforceManager.get_xp_progress(sector_key);
+			if (spec.rank === WorkforceManager.RANK_CHIEF) {
+				html += `<div class="workforce-xp">XP: MAXED</div>`;
+			} else {
+				html += `<div class="workforce-xp">XP: ${xp_data.xp} / ${xp_data.next}</div>`;
+				const pct = Math.min(100, (xp_data.xp / xp_data.next) * 100);
+				html += `<div class="workforce-xp-bar"><div class="workforce-xp-fill" style="width: ${pct}%"></div></div>`;
+			}
+			html += `<div class="workforce-stats">MISSIONS: ${spec.missions} // PERILS: ${spec.perils}</div>`;
+		} else {
+			html += `<button class="workforce-promote-btn" data-sector="${sector_key}" ${can_promote ? "" : "disabled"}>PROMOTE [${cost.toLocaleString()} CR]</button>`;
+			html += `</div>`;
+		}
+
+		html += `</div>`;
+	}
+	list.innerHTML = html;
+
+	list.querySelectorAll(".workforce-promote-btn[data-sector]").forEach(btn => {
+		btn.addEventListener("click", () => {
+			if (WorkforceManager.promote(btn.dataset.sector)) {
+				render_workforce_list();
+			}
+		});
+	});
 }
 
 // ============================================================
@@ -967,6 +1737,10 @@ function init() {
 	document.getElementById("start-btn").addEventListener("click", on_start);
 	document.getElementById("restart-btn").addEventListener("click", on_restart);
 	document.getElementById("advance-btn").addEventListener("click", on_advance);
+	document.getElementById("workforce-close-btn").addEventListener("click", () => {
+		document.getElementById("workforce-modal").style.display = "none";
+		refresh_all();
+	});
 	document.querySelectorAll(".sector-btn").forEach(btn => {
 		btn.addEventListener("click", () => on_sector_click(btn.dataset.sector));
 	});
