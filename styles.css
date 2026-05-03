@@ -192,7 +192,7 @@ body {
 .peril-choice-cost { font-size: 10px; color: var(--text-mid); }
 
 /* GENERIC MODAL */
-#workforce-modal {
+#workforce-modal, #vessel-modal, #bm-modal {
 	position: fixed; inset: 0;
 	background: rgba(0, 0, 0, 0.85);
 	display: flex; align-items: center; justify-content: center;
@@ -510,9 +510,42 @@ body {
 .event-btn.cooldown { color: var(--text-dim); border-color: var(--border-dim); }
 .event-btn.unaffordable { color: var(--accent-rust); border-color: rgba(191, 56, 43, 0.3); }
 
-.event-name { font-size: 13px; letter-spacing: 1px; margin-bottom: 4px; }
+.event-header {
+	display: flex; justify-content: space-between; align-items: center;
+	gap: 8px;
+	margin-bottom: 4px;
+}
+
+.event-name { font-size: 13px; letter-spacing: 1px; }
+
+.event-badge {
+	font-size: 9px;
+	letter-spacing: 1px;
+	padding: 2px 6px;
+	border: 1px solid currentColor;
+}
+
+.event-badge.cooldown { color: var(--text-dim); }
+.event-badge.insufficient { color: var(--accent-rust); }
+
 .event-desc { font-size: 11px; color: var(--text-mid); margin-bottom: 4px; }
-.event-flavor { font-size: 10px; color: var(--text-dim); font-style: italic; }
+.event-flavor { font-size: 10px; color: var(--text-dim); font-style: italic; margin-bottom: 8px; }
+
+.event-effects {
+	border-top: 1px solid var(--border-dim);
+	padding-top: 6px;
+	font-size: 10px;
+	letter-spacing: 1px;
+}
+
+.event-cost {
+	color: var(--accent-rust);
+	margin-bottom: 2px;
+}
+
+.event-reward {
+	color: var(--accent-green);
+}
 
 #threat-panel {
 	background: var(--bg-card);
