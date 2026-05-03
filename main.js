@@ -1407,7 +1407,7 @@ function format_event_reward(ev) {
 	return parts.join(", ");
 }
 
-
+function refresh_content() {
 	const content = document.getElementById("content");
 	const sector_key = GameState.active_sector;
 	const sector = GameState.sectors[sector_key];
