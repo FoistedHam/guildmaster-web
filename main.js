@@ -1264,231 +1264,6 @@ const SectorEventManager = {
 			flavor: "The locked door is the kindest thing.",
 			cost: {}, cooldown: COOLDOWN_MEDIUM,
 			effects: { morale: -0.06, threat_level: -0.03 }, result: "Block quarantined." },
-
-		// ============================================================
-		// TRAVEL — conditional events
-		// ============================================================
-		smuggler_passage: { id: "smuggler_passage", sector: "travel", name: "SMUGGLER PASSAGE",
-			desc: "A smuggler offers safe passage out for credits. Pays well but Guild auditors notice.",
-			flavor: "They never ask what's in the crates. That's the point.",
-			cost: {}, cooldown: COOLDOWN_MEDIUM,
-			effects: { credits: 9000, gm_political_heat: 0.04 },
-			result: "Smuggler paid in full.",
-			condition: () => GameState.gm_political_heat < 0.6,
-			condition_label: "Locked: political heat too high (<60%)" },
-		evacuation_drill: { id: "evacuation_drill", sector: "travel", name: "EVACUATION DRILL",
-			desc: "Run a station-wide evacuation drill. Costs morale but reduces casualties from future hull breaches.",
-			flavor: "Practice the panic before the real thing.",
-			cost: { credits: -3000 }, cooldown: COOLDOWN_LONG,
-			effects: { credits: -3000, morale: -0.04, hull_integrity: 0.04 },
-			result: "Drill complete. Crew prepared.",
-			condition: () => GameState.threat_level > 0.4,
-			condition_label: "Locked: requires elevated threat (>40%)" },
-		refugee_intake: { id: "refugee_intake", sector: "travel", name: "REFUGEE INTAKE",
-			desc: "Take in refugees from a failed station nearby. Adds crew but strains food supplies.",
-			flavor: "They have nowhere else. We have walls and air.",
-			cost: {}, cooldown: COOLDOWN_LONG,
-			effects: { crew_total: 400, food: -2000, morale: 0.05 },
-			result: "Refugees integrated.",
-			condition: () => GameState.crew_total < 8000 && GameState.get_resource("food") > 4000,
-			condition_label: "Locked: requires crew <8,000 and food >4,000" },
-
-		// ============================================================
-		// TRADE & LOGISTICS — conditional events
-		// ============================================================
-		emergency_food_buy: { id: "emergency_food_buy", sector: "trade_logistics", name: "EMERGENCY FOOD BUY",
-			desc: "Buy 3,000 food units at premium prices. No delivery delay. Available only when food is critical.",
-			flavor: "When the bellies empty, you pay any price.",
-			cost: { credits: -15000 }, cooldown: COOLDOWN_SHORT,
-			effects: { credits: -15000, food: 3000 },
-			result: "Emergency rations secured.",
-			condition: () => GameState.get_resource_pct("food") < 0.3,
-			condition_label: "Locked: only available when food <30%" },
-		dump_surplus: { id: "dump_surplus", sector: "trade_logistics", name: "DUMP SURPLUS",
-			desc: "Liquidate hoarded inventory at scrap rates. Quick credits when you have stockpiles to spare.",
-			flavor: "Cheaper than warehousing it forever.",
-			cost: {}, cooldown: COOLDOWN_MEDIUM,
-			effects: { parts: -800, munitions: -500, credits: 7500 },
-			result: "Surplus liquidated.",
-			condition: () => GameState.get_resource("parts") > 3000 && GameState.get_resource("munitions") > 2000,
-			condition_label: "Locked: requires parts >3,000 and munitions >2,000" },
-		freight_speculation: { id: "freight_speculation", sector: "trade_logistics", name: "FREIGHT SPECULATION",
-			desc: "Sink credits into a high-risk shipping venture. Big payoff requires capital.",
-			flavor: "The market punishes the timid. The market also punishes the bold. Mostly the bold.",
-			cost: { credits: -20000 }, cooldown: COOLDOWN_LONG,
-			effects: { credits: 32000 },
-			result: "Speculation paid out.",
-			condition: () => GameState.get_resource("credits") >= 40000,
-			condition_label: "Locked: requires 40,000+ CR reserves" },
-
-		// ============================================================
-		// EXPLORATION — conditional events
-		// ============================================================
-		salvage_run: { id: "salvage_run", sector: "exploration", name: "DEEP SALVAGE RUN",
-			desc: "Send long-range crews into hostile space. Returns parts and munitions if they survive.",
-			flavor: "Half come back. The other half pay for the half that did.",
-			cost: { credits: -8000, fuel: -800 }, cooldown: COOLDOWN_LONG,
-			effects: { credits: -8000, fuel: -800, parts: 600, munitions: 400, crew_total: -100 },
-			result: "Salvage recovered. Some crew did not.",
-			condition: () => GameState.threat_level < 0.7 && GameState.get_resource("fuel") > 1500,
-			condition_label: "Locked: requires threat <70% and fuel >1,500" },
-		map_uncharted: { id: "map_uncharted", sector: "exploration", name: "MAP UNCHARTED ROUTE",
-			desc: "Survey new shipping lanes. Permanent reduction in fuel consumption.",
-			flavor: "Every map ends where someone died.",
-			cost: { credits: -12000, fuel: -500 }, cooldown: COOLDOWN_LONG,
-			effects: { credits: -12000, fuel: -500 },
-			special: "fuel_efficiency",
-			result: "Route charted. Fuel efficiency permanent.",
-			condition: () => GameState.cycle > 8,
-			condition_label: "Locked: available after cycle 8" },
-		ghost_signal: { id: "ghost_signal", sector: "exploration", name: "INVESTIGATE GHOST SIGNAL",
-			desc: "A repeating signal from dead space. Could be salvage. Could be something worse.",
-			flavor: "It is broadcasting on a frequency that has been dead for a hundred years.",
-			cost: { fuel: -400 }, cooldown: COOLDOWN_LONG,
-			effects: { fuel: -400, credits: 6000, threat_level: 0.06 },
-			result: "Signal investigated. Something noticed back.",
-			condition: () => GameState.threat_level > 0.3,
-			condition_label: "Locked: requires elevated threat (>30%)" },
-
-		// ============================================================
-		// SECURITY & INTEL — conditional events
-		// ============================================================
-		blackbag_op: { id: "blackbag_op", sector: "security_intel", name: "BLACK-BAG OPERATION",
-			desc: "Off-the-books wetwork. Reduces personal threat sharply but raises political heat.",
-			flavor: "No bodies. No paperwork. No questions.",
-			cost: { credits: -10000 }, cooldown: COOLDOWN_LONG,
-			effects: { credits: -10000, gm_personal_threat: -0.15, gm_political_heat: 0.06 },
-			result: "Target neutralized. Quietly.",
-			condition: () => GameState.gm_personal_threat > 0.4,
-			condition_label: "Locked: requires personal threat >40%" },
-		intel_sweep: { id: "intel_sweep", sector: "security_intel", name: "COUNTERINTEL SWEEP",
-			desc: "Sweep the station for moles. High threat reduction when infiltration is suspected.",
-			flavor: "Trust nothing. Trust no one. Especially not yourself.",
-			cost: { credits: -7000 }, cooldown: COOLDOWN_MEDIUM,
-			effects: { credits: -7000, threat_level: -0.12 },
-			result: "Sweep complete. Several arrests made.",
-			condition: () => GameState.threat_level > 0.5,
-			condition_label: "Locked: requires threat >50%" },
-		sell_intel: { id: "sell_intel", sector: "security_intel", name: "SELL INTEL TO RIVALS",
-			desc: "Trade station intelligence to outside parties for credits. Spikes political heat.",
-			flavor: "Information is the only commodity that grows when shared.",
-			cost: {}, cooldown: COOLDOWN_LONG,
-			effects: { credits: 14000, gm_political_heat: 0.1 },
-			result: "Intel sold. Buyer pleased.",
-			condition: () => GameState.gm_political_heat < 0.5,
-			condition_label: "Locked: only available when political heat <50%" },
-
-		// ============================================================
-		// POLITICS & INFO — conditional events
-		// ============================================================
-		bribe_inspector: { id: "bribe_inspector", sector: "politics_info", name: "BRIBE INSPECTOR",
-			desc: "An inspector arrives. A discrete payment makes the audit go smoothly.",
-			flavor: "Everyone has a price. Inspectors usually have a small one.",
-			cost: { credits: -10000 }, cooldown: COOLDOWN_MEDIUM,
-			effects: { credits: -10000, gm_political_heat: -0.15 },
-			result: "Inspector found nothing irregular.",
-			condition: () => GameState.gm_political_heat > 0.3,
-			condition_label: "Locked: requires political heat >30%" },
-		stage_victory: { id: "stage_victory", sector: "politics_info", name: "STAGE A VICTORY",
-			desc: "Manufacture a triumphant news cycle. Big morale boost when crew is wavering.",
-			flavor: "Pick the footage. Cut the speech. Print the lie.",
-			cost: { credits: -6000 }, cooldown: COOLDOWN_LONG,
-			effects: { credits: -6000, morale: 0.15, gm_political_heat: 0.04 },
-			result: "Victory broadcast. Crew cheered on cue.",
-			condition: () => GameState.morale < 0.5,
-			condition_label: "Locked: only available when morale <50%" },
-		guild_favor: { id: "guild_favor", sector: "politics_info", name: "CALL IN GUILD FAVOR",
-			desc: "Cash in goodwill with Guild Central. Significant heat reduction. One-time per low-heat window.",
-			flavor: "Favors are finite. Spend them well.",
-			cost: { credits: -4000 }, cooldown: COOLDOWN_LONG,
-			effects: { credits: -4000, gm_political_heat: -0.18 },
-			result: "Favor called in. Guild Central content.",
-			condition: () => GameState.gm_political_heat < 0.4 && GameState.cycle > 5,
-			condition_label: "Locked: requires political heat <40% and cycle >5" },
-
-		// ============================================================
-		// LABOR & AFFAIRS — conditional events
-		// ============================================================
-		recruitment_drive: { id: "recruitment_drive", sector: "labor_affairs", name: "RECRUITMENT DRIVE",
-			desc: "Aggressive recruitment from passing transports. Adds crew when ranks are thin.",
-			flavor: "The desperate make the best new hires.",
-			cost: { credits: -8000, food: -1000 }, cooldown: COOLDOWN_LONG,
-			effects: { credits: -8000, food: -1000, crew_total: 600, morale: -0.02 },
-			result: "New crew sworn in.",
-			condition: () => GameState.crew_total < 7000,
-			condition_label: "Locked: only available when crew <7,000" },
-		profit_sharing: { id: "profit_sharing", sector: "labor_affairs", name: "PROFIT SHARING SCHEME",
-			desc: "Distribute a credit bonus to all crew. Massive morale boost when treasury allows.",
-			flavor: "They will work harder for someone who has paid them. For now.",
-			cost: { credits: -25000 }, cooldown: COOLDOWN_LONG,
-			effects: { credits: -25000, morale: 0.18 },
-			result: "Bonuses distributed. Crew briefly enthusiastic.",
-			condition: () => GameState.get_resource("credits") >= 50000,
-			condition_label: "Locked: requires 50,000+ CR" },
-		work_camp: { id: "work_camp", sector: "labor_affairs", name: "ESTABLISH WORK CAMP",
-			desc: "Convert a residential block to forced labor. Generates revenue but devastates morale and raises heat.",
-			flavor: "There is always someone who deserves it. Or close enough.",
-			cost: {}, cooldown: COOLDOWN_LONG,
-			effects: { credits: 18000, morale: -0.18, gm_political_heat: 0.1 },
-			result: "Camp operational. Output up.",
-			condition: () => GameState.morale < 0.4 || GameState.threat_level > 0.6,
-			condition_label: "Locked: requires morale <40% or threat >60%" },
-
-		// ============================================================
-		// ENGINEERING — conditional events
-		// ============================================================
-		jury_rig: { id: "jury_rig", sector: "engineering", name: "JURY-RIG SYSTEMS",
-			desc: "Quick fixes with whatever's lying around. Cheap hull repair when parts are scarce.",
-			flavor: "It will hold. Probably. For a while.",
-			cost: { credits: -2000 }, cooldown: COOLDOWN_SHORT,
-			effects: { credits: -2000, hull_integrity: 0.06, parts: -50 },
-			result: "Systems jury-rigged. Looks awful.",
-			condition: () => GameState.get_resource("parts") < 1500 && GameState.hull_integrity < 0.7,
-			condition_label: "Locked: requires parts <1,500 and integrity <70%" },
-		overclock_fabricators: { id: "overclock_fabricators", sector: "engineering", name: "OVERCLOCK FABRICATORS",
-			desc: "Push the fab bays past spec. Triple parts output but burns crew and risks integrity.",
-			flavor: "The machines were rated for half this. Push them anyway.",
-			cost: { credits: -10000 }, cooldown: COOLDOWN_LONG,
-			effects: { credits: -10000, parts: 1200, crew_total: -50, hull_integrity: -0.04 },
-			result: "Fabricators ran hot. Output excellent.",
-			condition: () => GameState.morale > 0.5,
-			condition_label: "Locked: requires morale >50%" },
-		cannibalize_systems: { id: "cannibalize_systems", sector: "engineering", name: "CANNIBALIZE SYSTEMS",
-			desc: "Strip non-essential systems for parts. Last-resort when parts are gone.",
-			flavor: "We did not need that promenade lighting anyway.",
-			cost: {}, cooldown: COOLDOWN_LONG,
-			effects: { parts: 600, morale: -0.08, hull_integrity: -0.06 },
-			result: "Systems stripped. Crew unsettled.",
-			condition: () => GameState.get_resource("parts") < 500,
-			condition_label: "Locked: only available when parts <500" },
-
-		// ============================================================
-		// MEDICAL — conditional events
-		// ============================================================
-		field_research: { id: "field_research", sector: "medical", name: "BIOMEDICAL RESEARCH PUSH",
-			desc: "Long-term research pays out in medicine and morale. Requires stable conditions.",
-			flavor: "Science thrives in the cracks between disasters.",
-			cost: { credits: -10000 }, cooldown: COOLDOWN_LONG,
-			effects: { credits: -10000, medicine: 800, morale: 0.04 },
-			result: "Research breakthrough. Treatments synthesized.",
-			condition: () => GameState.threat_level < 0.4 && GameState.morale > 0.5,
-			condition_label: "Locked: requires threat <40% and morale >50%" },
-		experimental_treatment: { id: "experimental_treatment", sector: "medical", name: "EXPERIMENTAL TREATMENT",
-			desc: "Untested compounds for the GM. Risky personal therapy when the body wears thin.",
-			flavor: "It might extend your life. Or end it sooner. The doctor will not say which.",
-			cost: { credits: -8000, medicine: -300 }, cooldown: COOLDOWN_LONG,
-			effects: { credits: -8000, medicine: -300, gm_personal_threat: -0.1 },
-			result: "Treatment tolerated. Vitals stable.",
-			condition: () => GameState.gm_health < 0.7 || GameState.gm_personal_threat > 0.4,
-			condition_label: "Locked: requires GM health <70% or personal threat >40%" },
-		triage_protocol: { id: "triage_protocol", sector: "medical", name: "ENFORCE TRIAGE PROTOCOL",
-			desc: "Cold mathematics decides who gets treated. Stretches medicine but bleeds morale.",
-			flavor: "Someone has to decide. The math does not flinch.",
-			cost: {}, cooldown: COOLDOWN_MEDIUM,
-			effects: { medicine: 400, morale: -0.1, crew_total: -100 },
-			result: "Triage enforced. Survivors stabilized.",
-			condition: () => GameState.get_resource("medicine") < 600,
-			condition_label: "Locked: only available when medicine <600" },
 	},
 
 	tick() {
@@ -1498,18 +1273,7 @@ const SectorEventManager = {
 		}
 	},
 	get_events_for_sector(sector_key) {
-		return Object.values(this.EVENTS).filter(e => {
-			if (e.sector !== sector_key) return false;
-			if (e.condition && !e.condition()) return false;
-			return true;
-		});
-	},
-	get_locked_events_for_sector(sector_key) {
-		return Object.values(this.EVENTS).filter(e => {
-			if (e.sector !== sector_key) return false;
-			if (!e.condition) return false;
-			return !e.condition();
-		});
+		return Object.values(this.EVENTS).filter(e => e.sector === sector_key);
 	},
 	is_on_cooldown(event_id) { return this.cooldowns[event_id] !== undefined; },
 	get_cooldown(event_id) { return this.cooldowns[event_id] || 0; },
@@ -1709,21 +1473,6 @@ function refresh_content() {
 					${reward_line ? `<div class="event-reward">EFFECT: ${reward_line}</div>` : ""}
 				</div>
 			</button>`;
-		}
-	}
-
-	const locked = SectorEventManager.get_locked_events_for_sector(sector_key);
-	if (locked.length > 0) {
-		html += `<div class="section-title">LOCKED EVENTS</div>`;
-		for (const ev of locked) {
-			html += `<div class="event-btn locked-event" disabled>
-				<div class="event-header">
-					<span class="event-name">${ev.name}</span>
-					<span class="event-badge locked">LOCKED</span>
-				</div>
-				<div class="event-desc">${ev.desc}</div>
-				<div class="event-condition">${ev.condition_label || "Locked: conditions not met"}</div>
-			</div>`;
 		}
 	}
 
@@ -2182,7 +1931,39 @@ function on_restart() { location.reload(); }
 // ============================================================
 // INIT
 // ============================================================
+// ============================================================
+// BUILD INDICATOR — randomized accent on each page load
+// ============================================================
+const BUILD_PALETTES = [
+	{ name: "ICE",     accent: "#2194b8", cold: "#1a6b91", border_mid: "#1c303f", border_bright: "#294557", text: "#c7d9e0" },
+	{ name: "AMBER",   accent: "#d48210", cold: "#8a5208", border_mid: "#3a2a14", border_bright: "#5a4220", text: "#e0d3c0" },
+	{ name: "RUST",    accent: "#bf382b", cold: "#7a2218", border_mid: "#3a1a16", border_bright: "#5a261f", text: "#e0c8c4" },
+	{ name: "MOSS",    accent: "#1a8c40", cold: "#0f5828", border_mid: "#172e1f", border_bright: "#244a30", text: "#c4dcc8" },
+	{ name: "VIOLET",  accent: "#7b4fa8", cold: "#523070", border_mid: "#2a1f3a", border_bright: "#403058", text: "#d0c4dc" },
+	{ name: "CYAN",    accent: "#1ec6c0", cold: "#138682", border_mid: "#143030", border_bright: "#1f4848", text: "#c0dcdc" },
+	{ name: "BONE",    accent: "#c8b89a", cold: "#8a7d68", border_mid: "#2c2a24", border_bright: "#46423a", text: "#d8d0c0" },
+	{ name: "BLOOD",   accent: "#a01828", cold: "#6a101a", border_mid: "#3a1418", border_bright: "#581c22", text: "#dcc0c4" },
+	{ name: "GOLD",    accent: "#c9a032", cold: "#866a20", border_mid: "#2e2614", border_bright: "#48381e", text: "#dcd0a8" },
+	{ name: "ROGUE",   accent: "#e0529f", cold: "#963468", border_mid: "#3a1c2c", border_bright: "#582a44", text: "#dcc0d0" },
+];
+
+function apply_build_palette() {
+	const p = BUILD_PALETTES[Math.floor(Math.random() * BUILD_PALETTES.length)];
+	const r = document.documentElement.style;
+	r.setProperty("--accent-ice", p.accent);
+	r.setProperty("--accent-cold", p.cold);
+	r.setProperty("--border-mid", p.border_mid);
+	r.setProperty("--border-bright", p.border_bright);
+	r.setProperty("--text-bright", p.text);
+	console.log(`%cBUILD PALETTE: ${p.name}`, `color: ${p.accent}; font-weight: bold; letter-spacing: 2px;`);
+	// Append palette name to welcome subtitle for visual confirmation
+	const sub = document.querySelector(".welcome-box .subtitle");
+	if (sub) sub.textContent = sub.textContent + ` // BUILD: ${p.name}`;
+	return p;
+}
+
 function init() {
+	apply_build_palette();
 	console.log("Guildmaster booting...");
 	document.getElementById("start-btn").addEventListener("click", on_start);
 	document.getElementById("restart-btn").addEventListener("click", on_restart);
