@@ -765,6 +765,105 @@ body {
 
 .labor-action-btn:hover, .labor-action-btn:active { background: var(--bg-hover); }
 
+/* FACTIONS */
+.faction-list {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin-bottom: 16px;
+}
+
+.faction-row {
+	background: var(--bg-card);
+	border: 1px solid var(--border-dim);
+	padding: 10px;
+}
+
+.faction-row-header {
+	display: flex; justify-content: space-between; align-items: center;
+	gap: 10px; margin-bottom: 4px;
+}
+
+.faction-name {
+	color: var(--text-bright);
+	font-size: 12px; letter-spacing: 1px;
+}
+
+.faction-tier {
+	font-size: 10px; letter-spacing: 1px;
+	padding: 2px 6px;
+	border: 1px solid currentColor;
+}
+
+.faction-tier.hostile     { color: var(--accent-rust); }
+.faction-tier.unfriendly  { color: var(--accent-amber); }
+.faction-tier.neutral     { color: var(--text-mid); }
+.faction-tier.friendly    { color: var(--accent-green); }
+.faction-tier.allied      { color: var(--accent-ice); }
+
+.faction-desc {
+	color: var(--text-dim);
+	font-size: 10px;
+	font-style: italic;
+	margin-bottom: 8px;
+}
+
+.faction-bar-wrap {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.faction-bar-track {
+	flex: 1;
+	position: relative;
+	height: 8px;
+	background: var(--bg-void);
+	border: 1px solid var(--border-dim);
+	overflow: hidden;
+}
+
+.faction-bar-center {
+	position: absolute;
+	top: 0; left: 50%;
+	width: 1px; height: 100%;
+	background: var(--text-dim);
+	z-index: 1;
+}
+
+.faction-bar-fill {
+	position: absolute;
+	top: 0; bottom: 0;
+	background: var(--text-mid);
+	transition: width 0.2s;
+}
+
+.faction-bar-fill.hostile     { background: var(--accent-rust); }
+.faction-bar-fill.unfriendly  { background: var(--accent-amber); }
+.faction-bar-fill.neutral     { background: var(--text-mid); }
+.faction-bar-fill.friendly    { background: var(--accent-green); }
+.faction-bar-fill.allied      { background: var(--accent-ice); }
+
+.faction-value {
+	font-size: 11px;
+	min-width: 60px;
+	text-align: right;
+}
+
+.faction-num {
+	color: var(--text-bright);
+	font-weight: bold;
+}
+
+.faction-delta {
+	margin-left: 4px;
+	font-size: 10px;
+	font-weight: bold;
+}
+
+.faction-delta.pos { color: var(--accent-green); }
+.faction-delta.neg { color: var(--accent-rust); }
+
 @media (min-width: 900px) {
 	#app {
 		grid-template-columns: 200px 1fr 280px;
