@@ -134,6 +134,7 @@ const GameState = {
 		BlackMarketManager.reset();
 		WorkforceManager.reset();
 		FactionManager.reset();
+		StoryManager.reset();
 		this.log_event("CYCLE", `Guildmaster ${this.guildmaster_name} assumes command.`, "info");
 	},
 
@@ -158,6 +159,8 @@ const GameState = {
 		BlackMarketManager.tick();
 		WorkforceManager.tick();
 		FactionManager.tick();
+		StoryManager.tick_actions();
+		StoryManager.tick();
 		SectorEventManager.tick();
 		ThreatManager.tick();
 		PerilManager.tick(this.cycle);
@@ -848,6 +851,367 @@ const FactionManager = {
 
 // Convenience global for conditions
 function fac(faction_id) { return FactionManager.standing(faction_id); }
+
+// ============================================================
+// STORY MANAGER
+// ============================================================
+// Lifecycle: locked → active → complete | failed
+// Survival odds = sum of (main weights × completion%) + (side weights × completion)
+// Failed mains contribute 0; failed mains are LOCKED (not retryable).
+// ============================================================
+const StoryManager = {
+	state: {},               // { quest_id: { status, objectives: { obj_id: current }, started_cycle, finished_cycle } }
+	streak_state: {},        // { quest_id_obj_id: consecutive_count }
+	max_main_weight_total: 100, // 5 mains × 20% = 100% baseline survival from mains alone
+	side_weight_default: 1,
+	main_weight_default: 20,
+
+	// ============================================================
+	// QUEST DEFINITIONS — fill in here as you write them
+	// ============================================================
+	QUESTS: {
+		// ----------------- MAIN QUESTS -----------------
+		main_01_clear_viewport: {
+			id: "main_01_clear_viewport",
+			type: "main",
+			weight: 20,
+			name: "CLEARING THE VIEWPORT",
+			flavor: "The radar systems and scanners cannot cut through all of the noise caused by metallic debris, derelict craft, and pirate cloaking fields. The void watches you. You cannot watch back.",
+			unlock: () => GameState.cycle >= 10,
+			unlock_label: "Begins at cycle 10.",
+			objectives: [
+				{ id: "scan_anomalies", label: "Resolve scanner anomalies", target: 25, type: "counter" },
+				{ id: "explore_blips",  label: "Investigate radar blips",   target: 15, type: "counter" },
+			],
+			rewards_text: "Neighboring alien envoys note your work clearing the system. Scanner and radar upgraded. +25% derelict salvage. +25% mining yield. Station-wide morale boost (20 cycles).",
+			on_complete: () => {
+				GameState.apply_effects({ morale: 0.15 });
+				StoryManager.flags.viewport_cleared = true;
+				StoryManager.flags.morale_boost_cycles = 20;
+				FactionManager.shift("free_traders", 8, "Viewport cleared");
+				GameState.log_event("STORY", "VIEWPORT CLEARED. Salvage and mining yields permanently increased.", "info");
+			},
+		},
+
+		main_02_chapel_on_sand: {
+			id: "main_02_chapel_on_sand",
+			type: "main",
+			weight: 20,
+			name: "A CHAPEL BUILT UPON SAND",
+			flavor: "Guild Watch is auditing. They want to see a station that runs. Not one that survives — one that runs.",
+			unlock: () => GameState.cycle >= 10,
+			unlock_label: "Begins at cycle 10.",
+			objectives: [
+				{ id: "stable_streak",     label: "Stabilize all sectors for consecutive cycles", target: 5,     type: "streak" },
+				{ id: "research_upgrades", label: "Research upgrades",                           target: 5,     type: "flag" },
+				{ id: "stockpile_food",    label: "Stockpile food",                              target: 10000, type: "stockpile", resource: "food" },
+				{ id: "stockpile_fuel",    label: "Stockpile fuel",                              target: 10000, type: "stockpile", resource: "fuel" },
+			],
+			rewards_text: "Guild Watch dispatches Gregor Alco — a unique specialist assignable to any sector with +15% experience gain.",
+			on_complete: () => {
+				StoryManager.flags.gregor_alco_available = true;
+				FactionManager.shift("guild_central", 12, "Audit passed");
+				GameState.log_event("STORY", "GREGOR ALCO has arrived. Assign him from Specialist Promotion.", "info");
+			},
+		},
+
+		// main_03..main_05 — fill in as you write them.
+
+		// ----------------- SIDE QUESTS -----------------
+		// 25 side quests, +1% each by default. Author them into this object.
+		// Example skeleton:
+		// side_01_example: {
+		//     id: "side_01_example", type: "side", weight: 1,
+		//     name: "EXAMPLE SIDE QUEST", flavor: "...",
+		//     unlock: () => true,
+		//     unlock_label: "Available now.",
+		//     objectives: [
+		//         { id: "do_thing", label: "Do the thing", target: 3, type: "counter" },
+		//     ],
+		//     rewards_text: "Small reward.",
+		//     on_complete: () => { GameState.apply_effects({ credits: 5000 }); },
+		// },
+	},
+
+	// Persistent flags & shared state for cross-quest mechanics
+	flags: {
+		viewport_cleared: false,
+		morale_boost_cycles: 0,
+		gregor_alco_available: false,
+		// add quest-set flags here as you write more content
+	},
+
+	// ============================================================
+	// CORE LIFECYCLE
+	// ============================================================
+
+	init_quest_state(qid) {
+		const q = this.QUESTS[qid];
+		if (!q) return;
+		const objs = {};
+		for (const o of q.objectives) objs[o.id] = 0;
+		this.state[qid] = {
+			status: "locked",
+			objectives: objs,
+			started_cycle: null,
+			finished_cycle: null,
+		};
+	},
+
+	tick() {
+		// 1. Unlock check — locked → active when unlock() returns true
+		for (const qid in this.QUESTS) {
+			const s = this.state[qid];
+			if (!s || s.status !== "locked") continue;
+			const q = this.QUESTS[qid];
+			if (q.unlock && q.unlock()) {
+				s.status = "active";
+				s.started_cycle = GameState.cycle;
+				GameState.log_event("STORY", `New quest: ${q.name}`, "info");
+			}
+		}
+
+		// 2. Tick each active quest's passive objectives
+		for (const qid in this.QUESTS) {
+			const s = this.state[qid];
+			if (!s || s.status !== "active") continue;
+			const q = this.QUESTS[qid];
+			for (const obj of q.objectives) {
+				if (obj.type === "stockpile") {
+					s.objectives[obj.id] = Math.min(obj.target, GameState.get_resource(obj.resource));
+				} else if (obj.type === "streak") {
+					// "stabilize all sectors for N cycles" — uses sector status as default check
+					const all_nominal = Object.values(GameState.sectors).every(sec => sec.status === "nominal");
+					const key = qid + "_" + obj.id;
+					if (all_nominal) {
+						this.streak_state[key] = (this.streak_state[key] || 0) + 1;
+					} else {
+						this.streak_state[key] = 0;
+					}
+					s.objectives[obj.id] = Math.min(obj.target, this.streak_state[key]);
+				}
+				// counter and flag are externally driven via progress() / set_flag()
+			}
+			// 3. Completion check
+			if (this._is_complete(qid)) this._complete(qid);
+		}
+
+		// 4. Flag-driven decay (e.g. morale boost cycles ticking down)
+		if (this.flags.morale_boost_cycles > 0) {
+			GameState.morale = Math.min(1, GameState.morale + 0.01);
+			this.flags.morale_boost_cycles--;
+			if (this.flags.morale_boost_cycles === 0) {
+				GameState.log_event("STORY", "Morale boost from VIEWPORT CLEARED has faded.", "info");
+			}
+		}
+	},
+
+	progress(qid, oid, amount) {
+		const s = this.state[qid];
+		if (!s || s.status !== "active") return false;
+		const q = this.QUESTS[qid];
+		const obj = q.objectives.find(o => o.id === oid);
+		if (!obj) return false;
+		s.objectives[oid] = Math.min(obj.target, (s.objectives[oid] || 0) + (amount || 1));
+		if (this._is_complete(qid)) this._complete(qid);
+		return true;
+	},
+
+	increment_flag(qid, oid) {
+		// Used for "research_upgrades" type objectives — call when a relevant action fires
+		return this.progress(qid, oid, 1);
+	},
+
+	fail(qid, reason) {
+		const s = this.state[qid];
+		if (!s || s.status !== "active") return;
+		s.status = "failed";
+		s.finished_cycle = GameState.cycle;
+		const q = this.QUESTS[qid];
+		GameState.log_event("STORY", `${q.name} — FAILED. ${reason || ""}`, "critical");
+	},
+
+	_is_complete(qid) {
+		const s = this.state[qid];
+		const q = this.QUESTS[qid];
+		if (!s || !q) return false;
+		return q.objectives.every(o => (s.objectives[o.id] || 0) >= o.target);
+	},
+
+	_complete(qid) {
+		const s = this.state[qid];
+		const q = this.QUESTS[qid];
+		s.status = "complete";
+		s.finished_cycle = GameState.cycle;
+		GameState.log_event("STORY", `${q.name} — COMPLETE.`, "info");
+		if (q.on_complete) q.on_complete();
+	},
+
+	// ============================================================
+	// QUERY / RENDER HELPERS
+	// ============================================================
+
+	get_status(qid) { return this.state[qid] ? this.state[qid].status : "locked"; },
+
+	get_completion_pct(qid) {
+		const s = this.state[qid];
+		const q = this.QUESTS[qid];
+		if (!s || !q) return 0;
+		if (s.status === "complete") return 1;
+		if (s.status === "failed") return 0;
+		let total = 0;
+		for (const o of q.objectives) {
+			const cur = s.objectives[o.id] || 0;
+			total += Math.min(1, cur / o.target);
+		}
+		return total / q.objectives.length;
+	},
+
+	// Survival odds: sum of (weight × completion%) per quest
+	// Failed quests contribute 0 (their weight is locked out).
+	get_survival_odds() {
+		let odds = 0;
+		for (const qid in this.QUESTS) {
+			const q = this.QUESTS[qid];
+			const pct = this.get_completion_pct(qid);
+			odds += q.weight * pct;
+		}
+		return Math.min(100, Math.round(odds));
+	},
+
+	// Maximum odds still achievable given failed quests
+	get_max_possible_odds() {
+		let max = 0;
+		for (const qid in this.QUESTS) {
+			const q = this.QUESTS[qid];
+			const s = this.state[qid];
+			if (s && s.status === "failed") continue;
+			max += q.weight;
+		}
+		return Math.min(100, max);
+	},
+
+	get_active_quests() {
+		const list = [];
+		for (const qid in this.QUESTS) {
+			if (this.get_status(qid) === "active") list.push(this.QUESTS[qid]);
+		}
+		return list;
+	},
+	get_quests_by_status(status) {
+		const list = [];
+		for (const qid in this.QUESTS) {
+			if (this.get_status(qid) === status) list.push(this.QUESTS[qid]);
+		}
+		return list;
+	},
+
+	is_quest_active(qid) { return this.get_status(qid) === "active"; },
+	has_flag(name) { return !!this.flags[name]; },
+
+	reset() {
+		this.state = {};
+		this.streak_state = {};
+		this.active_actions = [];
+		this.flags = {
+			viewport_cleared: false,
+			morale_boost_cycles: 0,
+			gregor_alco_available: false,
+		};
+		for (const qid in this.QUESTS) this.init_quest_state(qid);
+	},
+
+	// ============================================================
+	// STORY ACTIONS — multi-cycle player-initiated actions
+	// (e.g. "scan for anomaly" runs over 2 cycles, then progresses a quest objective)
+	// ============================================================
+
+	ACTIONS: {
+		scan_anomaly: {
+			id: "scan_anomaly", sector: "exploration",
+			label: "SCAN FOR ANOMALY",
+			desc: "Run a deep-scan sweep on a flagged scanner anomaly. Resolves in 2 cycles.",
+			cycles: 2,
+			cost: { credits: -1500, fuel: -100 },
+			quest_id: "main_01_clear_viewport",
+			objective_id: "scan_anomalies",
+			requires_quest_active: true,
+			result: "Anomaly resolved.",
+		},
+		explore_blip: {
+			id: "explore_blip", sector: "exploration",
+			label: "INVESTIGATE RADAR BLIP",
+			desc: "Send a crew to investigate a radar blip. Resolves in 3 cycles.",
+			cycles: 3,
+			cost: { credits: -2500, fuel: -200, munitions: -100 },
+			quest_id: "main_01_clear_viewport",
+			objective_id: "explore_blips",
+			requires_quest_active: true,
+			result: "Blip investigated.",
+		},
+	},
+
+	can_start_action(action_id) {
+		const a = this.ACTIONS[action_id];
+		if (!a) return false;
+		if (a.requires_quest_active && !this.is_quest_active(a.quest_id)) return false;
+		// Already at objective cap? Disallow new starts.
+		const s = this.state[a.quest_id];
+		const q = this.QUESTS[a.quest_id];
+		if (s && q) {
+			const obj = q.objectives.find(o => o.id === a.objective_id);
+			const in_progress = this.active_actions.filter(x => x.action_id === action_id).length;
+			if (obj && (s.objectives[obj.id] || 0) + in_progress >= obj.target) return false;
+		}
+		// Affordability
+		for (const k in a.cost) {
+			if (a.cost[k] < 0 && GameState.get_resource(k) < Math.abs(a.cost[k])) return false;
+		}
+		return true;
+	},
+
+	start_action(action_id) {
+		if (!this.can_start_action(action_id)) return false;
+		const a = this.ACTIONS[action_id];
+		GameState.apply_effects(a.cost);
+		this.active_actions.push({
+			action_id: action_id,
+			cycles_remaining: a.cycles,
+			started_cycle: GameState.cycle,
+		});
+		GameState.log_event("STORY", `${a.label} started.`, "info");
+		return true;
+	},
+
+	tick_actions() {
+		for (let i = this.active_actions.length - 1; i >= 0; i--) {
+			const inst = this.active_actions[i];
+			inst.cycles_remaining--;
+			if (inst.cycles_remaining <= 0) {
+				const a = this.ACTIONS[inst.action_id];
+				this.progress(a.quest_id, a.objective_id, 1);
+				GameState.log_event("STORY", `${a.label}: ${a.result}`, "info");
+				this.active_actions.splice(i, 1);
+			}
+		}
+	},
+
+	get_actions_for_sector(sector_key) {
+		const list = [];
+		for (const aid in this.ACTIONS) {
+			const a = this.ACTIONS[aid];
+			if (a.sector !== sector_key) continue;
+			if (a.requires_quest_active && !this.is_quest_active(a.quest_id)) continue;
+			list.push(a);
+		}
+		return list;
+	},
+
+	get_active_action_count(action_id) {
+		return this.active_actions.filter(x => x.action_id === action_id).length;
+	},
+};
+
 // ============================================================
 // PERIL MANAGER
 // ============================================================
@@ -1368,7 +1732,9 @@ const SectorEventManager = {
 			desc: "Launch detection buoys around the station perimeter. Provides early warning of approaching threats and reduces overall threat level.",
 			flavor: "You cannot fight what you cannot see.",
 			cost: { credits: -8000 }, cooldown: COOLDOWN_MEDIUM,
-			effects: { credits: -8000, threat_level: -0.06 }, result: "Sensor buoys deployed." },
+			effects: { credits: -8000, threat_level: -0.06 },
+			is_research: true,
+			result: "Sensor buoys deployed." },
 		expedition_contract: { id: "expedition_contract", sector: "exploration", name: "POST EXPEDITION CONTRACT",
 			desc: "Hire freelance crews to scout the local sector. Pays out on completion.",
 			flavor: "Let someone else take the risk. Charge them for the privilege.",
@@ -1407,7 +1773,9 @@ const SectorEventManager = {
 			desc: "Suppress damaging stories before they spread off-station. Major reduction in political heat.",
 			flavor: "What they do not know cannot hurt you.",
 			cost: { credits: -8000 }, cooldown: COOLDOWN_LONG,
-			effects: { credits: -8000, gm_political_heat: -0.12 }, result: "Narrative suppressed." },
+			effects: { credits: -8000, gm_political_heat: -0.12 },
+			is_research: true,
+			result: "Narrative suppressed." },
 		negotiate_unions: { id: "negotiate_unions", sector: "labor_affairs", name: "NEGOTIATE WITH UNIONS",
 			desc: "Open formal talks with the Union Councils. Resolves grievances, boosts morale.",
 			flavor: "They want to be heard.",
@@ -1443,6 +1811,7 @@ const SectorEventManager = {
 			cost: { credits: -15000 }, cooldown: COOLDOWN_LONG,
 			effects: { credits: -15000, hull_integrity: 0.05 },
 			special: "fuel_efficiency",
+			is_research: true,
 			result: "Grid upgraded. Fuel efficiency improved." },
 		restock_medical: { id: "restock_medical", sector: "medical", name: "RESTOCK MEDICAL",
 			desc: "Direct purchase of 800 units of medicine.",
@@ -1453,7 +1822,9 @@ const SectorEventManager = {
 			desc: "Vaccinate the entire crew. Reduces threat from outbreaks and slightly improves morale.",
 			flavor: "Prevention is cheap.",
 			cost: { credits: -10000, medicine: -400 }, cooldown: COOLDOWN_LONG,
-			effects: { credits: -10000, medicine: -400, morale: 0.02, threat_level: -0.02 }, result: "Inoculation complete." },
+			effects: { credits: -10000, medicine: -400, morale: 0.02, threat_level: -0.02 },
+			is_research: true,
+			result: "Inoculation complete." },
 		quarantine_block: { id: "quarantine_block", sector: "medical", name: "QUARANTINE BLOCK",
 			desc: "Seal off a residential block to contain potential outbreaks. Reduces threat at morale cost.",
 			flavor: "The locked door is the kindest thing.",
@@ -1526,6 +1897,7 @@ const SectorEventManager = {
 			cost: { credits: -12000, fuel: -500 }, cooldown: COOLDOWN_LONG,
 			effects: { credits: -12000, fuel: -500 },
 			special: "fuel_efficiency",
+			is_research: true,
 			result: "Route charted. Fuel efficiency permanent.",
 			condition: () => GameState.cycle > 8,
 			condition_label: "Locked: available after cycle 8" },
@@ -1707,7 +2079,17 @@ const SectorEventManager = {
 			GameState.log_event("EVENT", `Insufficient resources.`, "warning");
 			return;
 		}
-		GameState.apply_effects(ev.effects);
+		// Apply viewport-cleared bonus to salvage-style events
+		let effects = ev.effects;
+		if (StoryManager.has_flag("viewport_cleared") && (event_id === "salvage_run" || event_id === "ghost_signal")) {
+			effects = { ...ev.effects };
+			for (const k in effects) {
+				if (effects[k] > 0 && (k === "credits" || k === "parts" || k === "munitions")) {
+					effects[k] = Math.floor(effects[k] * 1.25);
+				}
+			}
+		}
+		GameState.apply_effects(effects);
 		// Special handlers
 		if (ev.special === "tourism_crew") {
 			const new_crew = Math.floor(Math.random() * 21);
@@ -1728,6 +2110,9 @@ const SectorEventManager = {
 			for (const fid in ev.faction_shifts) {
 				FactionManager.shift(fid, ev.faction_shifts[fid]);
 			}
+		}
+		if (ev.is_research && StoryManager.is_quest_active("main_02_chapel_on_sand")) {
+			StoryManager.increment_flag("main_02_chapel_on_sand", "research_upgrades");
 		}
 		GameState.log_event(ev.sector.toUpperCase(), ev.result, "info");
 		this.cooldowns[event_id] = ev.cooldown;
@@ -1852,6 +2237,8 @@ function refresh_content() {
 		html += render_labor_extras();
 	} else if (sector_key === "politics_info") {
 		html += render_politics_extras();
+	} else if (sector_key === "exploration") {
+		html += render_exploration_extras();
 	}
 
 	html += `<div class="section-title">SUBSECTORS</div>`;
@@ -2039,8 +2426,51 @@ function render_labor_extras() {
 	return html;
 }
 
+function render_exploration_extras() {
+	const actions = StoryManager.get_actions_for_sector("exploration");
+	if (actions.length === 0) return "";
+	let html = `<div class="section-title">STORY ACTIONS</div>`;
+	for (const a of actions) {
+		const can = StoryManager.can_start_action(a.id);
+		const in_progress = StoryManager.get_active_action_count(a.id);
+		const cost_parts = [];
+		for (const k in a.cost) {
+			if (a.cost[k] < 0) cost_parts.push(`${Math.abs(a.cost[k]).toLocaleString()} ${k === "credits" ? "CR" : k}`);
+		}
+		html += `<div class="story-action-card">
+			<div class="story-action-header">
+				<span class="story-action-label">${a.label}</span>
+				<span class="story-action-cycles">${a.cycles}c</span>
+			</div>
+			<div class="story-action-desc">${a.desc}</div>
+			<div class="story-action-cost">COST: ${cost_parts.join(" + ")}</div>
+			${in_progress > 0 ? `<div class="story-action-progress">${in_progress} in progress</div>` : ""}
+			<button class="story-action-btn" data-story-action="${a.id}" ${can ? "" : "disabled"}>START</button>
+		</div>`;
+	}
+	return html;
+}
+
 function render_politics_extras() {
-	let html = `<div class="section-title">FACTION STANDINGS</div>`;
+	let html = `<div class="section-title">SURVIVAL ODDS</div>`;
+	const odds = StoryManager.get_survival_odds();
+	const max_odds = StoryManager.get_max_possible_odds();
+	const odds_class = odds < 30 ? "critical" : (odds < 60 ? "warning" : "good");
+	html += `<div class="survival-odds-card">
+		<div class="survival-odds-row">
+			<span class="survival-odds-label">CURRENT</span>
+			<span class="survival-odds-value ${odds_class}">${odds}%</span>
+		</div>
+		<div class="survival-odds-row">
+			<span class="survival-odds-label">MAX POSSIBLE</span>
+			<span class="survival-odds-value">${max_odds}%</span>
+		</div>
+		<div class="survival-odds-bar"><div class="survival-odds-fill ${odds_class}" style="width:${odds}%"></div></div>
+	</div>`;
+
+	html += render_story_quest_section();
+
+	html += `<div class="section-title">FACTION STANDINGS</div>`;
 	html += `<p style="font-size: 10px; color: var(--text-dim); margin-bottom: 12px;">Standings drift toward neutral. Hostile or allied factions exert passive effects each cycle.</p>`;
 	html += `<div class="faction-list">`;
 	for (const fid in FactionManager.FACTIONS) {
@@ -2048,7 +2478,6 @@ function render_politics_extras() {
 		const v = FactionManager.standing(fid);
 		const tier = FactionManager.get_tier(v);
 		const tier_class = FactionManager.get_tier_class(v);
-		// Bar: -100 to +100 mapped to 0-100% width with center marker
 		const bar_pct = ((v + 100) / 200) * 100;
 		const recent = FactionManager.last_change[fid];
 		let delta_html = "";
@@ -2078,6 +2507,70 @@ function render_politics_extras() {
 	return html;
 }
 
+function render_story_quest_section() {
+	let html = `<div class="section-title">STORY QUESTS</div>`;
+	const active = StoryManager.get_active_quests();
+	const complete = StoryManager.get_quests_by_status("complete");
+	const failed = StoryManager.get_quests_by_status("failed");
+	const locked = StoryManager.get_quests_by_status("locked");
+
+	if (active.length === 0 && complete.length === 0 && failed.length === 0) {
+		html += `<p style="font-size:11px; color:var(--text-mid);">No quests yet. Story unfolds as cycles pass.</p>`;
+	}
+
+	for (const q of active) html += render_quest_card(q, "active");
+	for (const q of complete) html += render_quest_card(q, "complete");
+	for (const q of failed) html += render_quest_card(q, "failed");
+	if (locked.length > 0) {
+		html += `<details class="quest-locked-toggle"><summary>${locked.length} LOCKED QUEST${locked.length > 1 ? "S" : ""}</summary>`;
+		for (const q of locked) {
+			html += `<div class="quest-card locked">
+				<div class="quest-card-header">
+					<span class="quest-name">${q.name}</span>
+					<span class="quest-type-badge ${q.type}">${q.type.toUpperCase()} ${q.weight}%</span>
+				</div>
+				<div class="quest-locked-label">${q.unlock_label || "Locked."}</div>
+			</div>`;
+		}
+		html += `</details>`;
+	}
+	return html;
+}
+
+function render_quest_card(q, status) {
+	const s = StoryManager.state[q.id];
+	const pct = StoryManager.get_completion_pct(q.id);
+	let html = `<div class="quest-card ${status}">`;
+	html += `<div class="quest-card-header">
+		<span class="quest-name">${q.name}</span>
+		<span class="quest-type-badge ${q.type} ${status}">${status === "complete" ? "DONE" : status === "failed" ? "FAILED" : q.type.toUpperCase() + " " + q.weight + "%"}</span>
+	</div>`;
+	html += `<div class="quest-flavor">${q.flavor}</div>`;
+	if (status === "active") {
+		html += `<div class="quest-objectives">`;
+		for (const o of q.objectives) {
+			const cur = s.objectives[o.id] || 0;
+			const op = Math.min(100, (cur / o.target) * 100);
+			html += `<div class="quest-objective">
+				<div class="quest-obj-row">
+					<span class="quest-obj-label">${o.label}</span>
+					<span class="quest-obj-progress">${cur.toLocaleString()} / ${o.target.toLocaleString()}</span>
+				</div>
+				<div class="quest-obj-bar"><div class="quest-obj-fill" style="width:${op}%"></div></div>
+			</div>`;
+		}
+		html += `</div>`;
+		html += `<div class="quest-rewards">REWARD: ${q.rewards_text}</div>`;
+	} else if (status === "complete") {
+		html += `<div class="quest-rewards complete">DELIVERED: ${q.rewards_text}</div>`;
+	} else if (status === "failed") {
+		html += `<div class="quest-rewards failed">QUEST FAILED — ${q.weight}% survival weight forfeited.</div>`;
+	}
+	html += `</div>`;
+	return html;
+}
+
+
 function wire_sector_extras() {
 	const content = document.getElementById("content");
 	content.querySelectorAll("[data-action]").forEach(btn => {
@@ -2096,6 +2589,12 @@ function wire_sector_extras() {
 				BlackMarketManager.purchase(parseInt(btn.dataset.index));
 				refresh_all();
 			}
+		});
+	});
+
+	content.querySelectorAll("[data-story-action]").forEach(btn => {
+		btn.addEventListener("click", () => {
+			if (StoryManager.start_action(btn.dataset.storyAction)) refresh_all();
 		});
 	});
 
@@ -2461,4 +2960,3 @@ function init() {
 }
 
 init();
-		
