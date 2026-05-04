@@ -864,6 +864,209 @@ body {
 .faction-delta.pos { color: var(--accent-green); }
 .faction-delta.neg { color: var(--accent-rust); }
 
+/* STORY */
+.survival-odds-card {
+	background: var(--bg-card);
+	border: 1px solid var(--border-mid);
+	padding: 12px;
+	margin-bottom: 12px;
+}
+
+.survival-odds-row {
+	display: flex; justify-content: space-between; align-items: center;
+	font-size: 11px;
+	margin-bottom: 4px;
+}
+
+.survival-odds-label {
+	color: var(--text-dim);
+	letter-spacing: 1px;
+}
+
+.survival-odds-value {
+	font-size: 18px;
+	font-weight: bold;
+	color: var(--text-bright);
+}
+
+.survival-odds-value.good { color: var(--accent-green); }
+.survival-odds-value.warning { color: var(--accent-amber); }
+.survival-odds-value.critical { color: var(--accent-rust); }
+
+.survival-odds-bar {
+	height: 6px;
+	background: var(--bg-void);
+	border: 1px solid var(--border-dim);
+	margin-top: 6px;
+}
+
+.survival-odds-fill {
+	height: 100%;
+	background: var(--accent-green);
+	transition: width 0.3s;
+}
+
+.survival-odds-fill.good { background: var(--accent-green); }
+.survival-odds-fill.warning { background: var(--accent-amber); }
+.survival-odds-fill.critical { background: var(--accent-rust); }
+
+.quest-card {
+	background: var(--bg-card);
+	border: 1px solid var(--border-mid);
+	padding: 12px;
+	margin-bottom: 8px;
+}
+
+.quest-card.complete { border-color: var(--accent-green); opacity: 0.85; }
+.quest-card.failed { border-color: var(--accent-rust); opacity: 0.7; }
+.quest-card.locked { border-color: var(--border-dim); opacity: 0.6; }
+
+.quest-card-header {
+	display: flex; justify-content: space-between; align-items: center;
+	gap: 10px; margin-bottom: 6px;
+	flex-wrap: wrap;
+}
+
+.quest-name {
+	color: var(--text-bright);
+	font-size: 13px; letter-spacing: 1px;
+}
+
+.quest-type-badge {
+	font-size: 10px; letter-spacing: 1px;
+	padding: 2px 6px;
+	border: 1px solid currentColor;
+}
+
+.quest-type-badge.main { color: var(--accent-amber); }
+.quest-type-badge.side { color: var(--accent-ice); }
+.quest-type-badge.complete { color: var(--accent-green); }
+.quest-type-badge.failed { color: var(--accent-rust); }
+
+.quest-flavor {
+	font-size: 11px;
+	color: var(--text-dim);
+	font-style: italic;
+	margin-bottom: 8px;
+	line-height: 1.5;
+}
+
+.quest-objectives {
+	margin: 8px 0;
+}
+
+.quest-objective {
+	margin-bottom: 6px;
+}
+
+.quest-obj-row {
+	display: flex; justify-content: space-between; align-items: center;
+	font-size: 11px;
+	margin-bottom: 2px;
+}
+
+.quest-obj-label { color: var(--text-bright); }
+.quest-obj-progress { color: var(--text-mid); font-size: 10px; }
+
+.quest-obj-bar {
+	height: 5px;
+	background: var(--bg-void);
+	border: 1px solid var(--border-dim);
+}
+
+.quest-obj-fill {
+	height: 100%;
+	background: var(--accent-ice);
+}
+
+.quest-rewards {
+	font-size: 10px;
+	color: var(--accent-amber);
+	letter-spacing: 1px;
+	margin-top: 8px;
+	padding-top: 8px;
+	border-top: 1px solid var(--border-dim);
+	line-height: 1.5;
+}
+
+.quest-rewards.complete { color: var(--accent-green); }
+.quest-rewards.failed { color: var(--accent-rust); }
+
+.quest-locked-label {
+	font-size: 10px;
+	color: var(--text-dim);
+	letter-spacing: 1px;
+}
+
+.quest-locked-toggle {
+	margin-bottom: 12px;
+}
+
+.quest-locked-toggle summary {
+	font-size: 10px;
+	color: var(--text-dim);
+	letter-spacing: 1px;
+	cursor: pointer;
+	padding: 6px 0;
+}
+
+/* STORY ACTIONS (sector buttons) */
+.story-action-card {
+	background: var(--bg-card);
+	border: 1px solid var(--accent-amber);
+	padding: 10px;
+	margin-bottom: 8px;
+}
+
+.story-action-header {
+	display: flex; justify-content: space-between; align-items: center;
+	margin-bottom: 4px;
+}
+
+.story-action-label {
+	color: var(--accent-amber);
+	font-size: 12px; letter-spacing: 1px;
+}
+
+.story-action-cycles {
+	color: var(--text-mid);
+	font-size: 10px;
+}
+
+.story-action-desc {
+	font-size: 11px;
+	color: var(--text-mid);
+	margin-bottom: 4px;
+}
+
+.story-action-cost {
+	font-size: 10px;
+	color: var(--accent-rust);
+	letter-spacing: 1px;
+	margin-bottom: 4px;
+}
+
+.story-action-progress {
+	font-size: 10px;
+	color: var(--accent-ice);
+	letter-spacing: 1px;
+	margin-bottom: 4px;
+}
+
+.story-action-btn {
+	background: var(--bg-panel);
+	color: var(--accent-amber);
+	border: 1px solid var(--accent-amber);
+	padding: 6px 12px;
+	font-family: inherit;
+	font-size: 11px; letter-spacing: 1px;
+	cursor: pointer;
+	width: 100%;
+}
+
+.story-action-btn:hover, .story-action-btn:active { background: var(--bg-hover); }
+.story-action-btn:disabled { cursor: not-allowed; opacity: 0.4; }
+
 @media (min-width: 900px) {
 	#app {
 		grid-template-columns: 200px 1fr 280px;
