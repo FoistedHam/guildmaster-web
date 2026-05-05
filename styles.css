@@ -488,6 +488,49 @@ body {
 
 #advance-btn.warning { color: var(--accent-amber); border-color: var(--accent-amber); }
 
+#save-btn {
+	background: var(--bg-card);
+	color: var(--text-mid);
+	border: 1px solid var(--border-mid);
+	padding: 12px;
+	font-family: inherit;
+	font-size: 11px; letter-spacing: 2px;
+	cursor: pointer;
+	min-height: 44px;
+	margin-top: 4px;
+	transition: all 0.15s;
+}
+
+#save-btn:hover, #save-btn:active {
+	background: var(--bg-hover);
+	border-color: var(--border-bright);
+	color: var(--text-bright);
+}
+
+#continue-btn {
+	width: 100%;
+	background: var(--bg-card);
+	color: var(--accent-amber);
+	border: 1px solid var(--accent-amber);
+	padding: 14px;
+	font-family: inherit;
+	font-size: 13px; letter-spacing: 2px;
+	cursor: pointer;
+	min-height: 50px;
+	margin-top: 8px;
+}
+
+#continue-btn:hover, #continue-btn:active {
+	background: var(--bg-hover);
+}
+
+.save-meta {
+	color: var(--text-dim);
+	font-size: 10px;
+	letter-spacing: 1px;
+	margin-top: 12px;
+}
+
 .event-btn {
 	display: block; width: 100%;
 	background: var(--bg-card);
