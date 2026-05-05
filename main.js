@@ -2844,6 +2844,160 @@ function render_bm_list() {
 }
 
 // ============================================================
+// SAVE MANAGER
+// ============================================================
+// Manual save only. Save is wiped on game over (true permadeath).
+// Single localStorage slot. JSON-serialized snapshot of GameState
+// plus all manager state.
+// ============================================================
+const SaveManager = {
+	KEY: "guildmaster_save_v1",
+
+	has_save() {
+		try {
+			return !!localStorage.getItem(this.KEY);
+		} catch (e) { return false; }
+	},
+
+	save() {
+		try {
+			const snap = {
+				version: 1,
+				saved_at: Date.now(),
+				game: {
+					station_name: GameState.station_name,
+					guildmaster_name: GameState.guildmaster_name,
+					cycle: GameState.cycle,
+					resources: GameState.resources,
+					crew_total: GameState.crew_total,
+					morale: GameState.morale,
+					threat_level: GameState.threat_level,
+					station_hull: GameState.station_hull,
+					hull_integrity: GameState.hull_integrity,
+					gm_alive: GameState.gm_alive,
+					gm_health: GameState.gm_health,
+					gm_political_heat: GameState.gm_political_heat,
+					gm_personal_threat: GameState.gm_personal_threat,
+					gm_imprisoned: GameState.gm_imprisoned,
+					sectors: GameState.sectors,
+					black_market_unlocked: GameState.black_market_unlocked,
+					tourism_crew: GameState.tourism_crew,
+					rationing_cycles: GameState.rationing_cycles,
+					active_sector: GameState.active_sector,
+					event_log: GameState.event_log,
+				},
+				workforce: {
+					specialists: WorkforceManager.specialists,
+					used_names: WorkforceManager.used_names,
+				},
+				economy: {
+					prices: EconomyManager.prices,
+					price_trend: EconomyManager.price_trend,
+					import_offers: EconomyManager.import_offers,
+					delivery_queue: EconomyManager.delivery_queue,
+					export_offers: EconomyManager.export_offers,
+					offer_refresh_countdown: EconomyManager.offer_refresh_countdown,
+					trade_vessel: EconomyManager.trade_vessel,
+					vessel_countdown: EconomyManager.vessel_countdown,
+				},
+				bm: {
+					stock: BlackMarketManager.stock,
+					stock_refresh_countdown: BlackMarketManager.stock_refresh_countdown,
+					active_addictions: BlackMarketManager.active_addictions,
+				},
+				factions: {
+					standings: FactionManager.standings,
+					last_change: FactionManager.last_change,
+				},
+				story: {
+					state: StoryManager.state,
+					streak_state: StoryManager.streak_state,
+					active_actions: StoryManager.active_actions || [],
+					flags: StoryManager.flags,
+				},
+				perils: {
+					active_perils: PerilManager.active_perils,
+					cooldowns: PerilManager.cooldowns,
+				},
+				threats: {
+					active_threats: ThreatManager.active_threats,
+				},
+				sector_events: {
+					cooldowns: SectorEventManager.cooldowns,
+				},
+			};
+			localStorage.setItem(this.KEY, JSON.stringify(snap));
+			return true;
+		} catch (e) {
+			console.error("Save failed:", e);
+			return false;
+		}
+	},
+
+	load() {
+		try {
+			const raw = localStorage.getItem(this.KEY);
+			if (!raw) return false;
+			const snap = JSON.parse(raw);
+			if (!snap || snap.version !== 1) return false;
+
+			// Reset everything to clean state first
+			GameState.new_game(snap.game.guildmaster_name);
+
+			// Restore GameState
+			Object.assign(GameState, snap.game);
+			GameState.game_active = true;
+
+			// Managers
+			WorkforceManager.specialists = snap.workforce.specialists || {};
+			WorkforceManager.used_names = snap.workforce.used_names || [];
+
+			Object.assign(EconomyManager, snap.economy);
+
+			BlackMarketManager.stock = snap.bm.stock || [];
+			BlackMarketManager.stock_refresh_countdown = snap.bm.stock_refresh_countdown || 4;
+			BlackMarketManager.active_addictions = snap.bm.active_addictions || [];
+
+			FactionManager.standings = snap.factions.standings || {};
+			FactionManager.last_change = snap.factions.last_change || {};
+
+			StoryManager.state = snap.story.state || {};
+			StoryManager.streak_state = snap.story.streak_state || {};
+			StoryManager.active_actions = snap.story.active_actions || [];
+			StoryManager.flags = snap.story.flags || StoryManager.flags;
+
+			PerilManager.active_perils = snap.perils.active_perils || [];
+			PerilManager.cooldowns = snap.perils.cooldowns || {};
+
+			ThreatManager.active_threats = snap.threats.active_threats || [];
+			SectorEventManager.cooldowns = snap.sector_events.cooldowns || {};
+
+			return true;
+		} catch (e) {
+			console.error("Load failed:", e);
+			return false;
+		}
+	},
+
+	wipe() {
+		try { localStorage.removeItem(this.KEY); } catch (e) {}
+	},
+
+	get_meta() {
+		try {
+			const raw = localStorage.getItem(this.KEY);
+			if (!raw) return null;
+			const snap = JSON.parse(raw);
+			return {
+				name: snap.game.guildmaster_name,
+				cycle: snap.game.cycle,
+				saved_at: snap.saved_at,
+			};
+		} catch (e) { return null; }
+	},
+};
+
+// ============================================================
 // GAME OVER
 // ============================================================
 const EPITAPHS = {
@@ -2860,6 +3014,7 @@ const EPITAPHS = {
 };
 
 function show_game_over(reason, category) {
+	SaveManager.wipe();
 	const screen = document.getElementById("game-over-screen");
 	const epitaphs = EPITAPHS[category] || EPITAPHS.combat;
 	const epitaph = epitaphs[Math.floor(Math.random() * epitaphs.length)];
@@ -2901,6 +3056,42 @@ function on_start() {
 	document.getElementById("app").style.display = "grid";
 	refresh_all();
 }
+
+function on_continue() {
+	if (!SaveManager.load()) {
+		alert("Save file unreadable. Beginning new game required.");
+		return;
+	}
+	document.getElementById("welcome-screen").style.display = "none";
+	document.getElementById("app").style.display = "grid";
+	refresh_all();
+}
+
+function on_save_and_quit() {
+	if (!GameState.game_active) return;
+	if (SaveManager.save()) {
+		GameState.log_event("SYSTEM", "Save written. Returning to main screen.", "info");
+		location.reload();
+	} else {
+		alert("Save failed. Storage may be unavailable.");
+	}
+}
+
+function update_welcome_save_state() {
+	const meta = SaveManager.get_meta();
+	const cont = document.getElementById("continue-btn");
+	const meta_p = document.getElementById("save-meta");
+	if (meta) {
+		cont.style.display = "block";
+		const date = new Date(meta.saved_at);
+		const datestr = date.toLocaleDateString() + " " + date.toLocaleTimeString();
+		meta_p.textContent = `Save: ${meta.name} // Cycle ${meta.cycle} // ${datestr}`;
+	} else {
+		cont.style.display = "none";
+		meta_p.textContent = "";
+	}
+}
+
 function on_restart() { location.reload(); }
 
 // ============================================================
@@ -2939,7 +3130,10 @@ function apply_build_palette() {
 function init() {
 	apply_build_palette();
 	console.log("Guildmaster booting...");
+	update_welcome_save_state();
 	document.getElementById("start-btn").addEventListener("click", on_start);
+	document.getElementById("continue-btn").addEventListener("click", on_continue);
+	document.getElementById("save-btn").addEventListener("click", on_save_and_quit);
 	document.getElementById("restart-btn").addEventListener("click", on_restart);
 	document.getElementById("advance-btn").addEventListener("click", on_advance);
 	document.getElementById("workforce-close-btn").addEventListener("click", () => {
