@@ -97,6 +97,11 @@ const GameState = {
 	tourism_crew: 0,
 	rationing_cycles: 0,
 	active_sector: "travel",
+	sector_focus: {
+		travel: "normal", trade_logistics: "normal", exploration: "normal",
+		security_intel: "normal", politics_info: "normal", labor_affairs: "normal",
+		engineering: "normal", medical: "normal",
+	},
 	event_log: [],
 
 	new_game(name) {
@@ -127,6 +132,11 @@ const GameState = {
 		this.rationing_cycles = 0;
 		this.event_log = [];
 		this.active_sector = "travel";
+		this.sector_focus = {
+			travel: "normal", trade_logistics: "normal", exploration: "normal",
+			security_intel: "normal", politics_info: "normal", labor_affairs: "normal",
+			engineering: "normal", medical: "normal",
+		};
 		SectorEventManager.reset();
 		ThreatManager.reset();
 		PerilManager.reset();
@@ -159,6 +169,7 @@ const GameState = {
 		BlackMarketManager.tick();
 		WorkforceManager.tick();
 		FactionManager.tick();
+		FocusManager.tick();
 		StoryManager.tick_actions();
 		StoryManager.tick();
 		SectorEventManager.tick();
@@ -709,8 +720,61 @@ const BlackMarketManager = {
 };
 
 // ============================================================
-// FACTION MANAGER
+// FOCUS MANAGER — sector focus modes (NORMAL / EFFICIENCY / SAFETY)
 // ============================================================
+const FocusManager = {
+	MODES: ["normal", "efficiency", "safety"],
+
+	// Per-sector tick effects when a non-normal mode is active
+	// EFFICIENCY trades passive cost for cheaper events
+	// SAFETY trades expensive events for passive benefit
+	SECTOR_EFFECTS: {
+		travel:          { efficiency: { threat_level: 0.005 },          safety: { threat_level: -0.003 } },
+		trade_logistics: { efficiency: { morale: -0.005 },               safety: { credits: 200 } },
+		exploration:     { efficiency: { threat_level: 0.006 },          safety: { threat_level: -0.004 } },
+		security_intel:  { efficiency: { gm_political_heat: 0.004 },     safety: { threat_level: -0.005 } },
+		politics_info:   { efficiency: { morale: -0.004 },               safety: { gm_political_heat: -0.003 } },
+		labor_affairs:   { efficiency: { morale: -0.006 },               safety: { morale: 0.005 } },
+		engineering:     { efficiency: { hull_integrity: -0.003 },       safety: { hull_integrity: 0.002 } },
+		medical:         { efficiency: { morale: -0.004 },               safety: { morale: 0.003 } },
+	},
+
+	MODE_LABELS: { normal: "NORMAL", efficiency: "EFFICIENCY", safety: "SAFETY" },
+	MODE_DESC: {
+		normal:     "Standard operations.",
+		efficiency: "Events 15% cheaper in credits. Passive cost per cycle.",
+		safety:     "Events 20% more expensive. Passive benefit per cycle.",
+	},
+
+	get_mode(sector_key) {
+		return GameState.sector_focus[sector_key] || "normal";
+	},
+
+	set_mode(sector_key, mode) {
+		if (!this.MODES.includes(mode)) return false;
+		GameState.sector_focus[sector_key] = mode;
+		GameState.log_event("FOCUS", `${sector_key.replace("_", " ").toUpperCase()} → ${this.MODE_LABELS[mode]}.`, "info");
+		return true;
+	},
+
+	tick() {
+		for (const sector_key in this.SECTOR_EFFECTS) {
+			const mode = this.get_mode(sector_key);
+			if (mode === "normal") continue;
+			const effects = this.SECTOR_EFFECTS[sector_key][mode];
+			if (effects) GameState.apply_effects(effects);
+		}
+	},
+
+	get_event_cost_multiplier(sector_key) {
+		const mode = this.get_mode(sector_key);
+		if (mode === "efficiency") return 0.85;
+		if (mode === "safety") return 1.20;
+		return 1.0;
+	},
+};
+
+
 const FactionManager = {
 	standings: {},
 	last_change: {}, // {faction_id: {delta, cycle}} for UI flash
@@ -2080,14 +2144,18 @@ const SectorEventManager = {
 			return;
 		}
 		// Apply viewport-cleared bonus to salvage-style events
-		let effects = ev.effects;
+		let effects = { ...ev.effects };
 		if (StoryManager.has_flag("viewport_cleared") && (event_id === "salvage_run" || event_id === "ghost_signal")) {
-			effects = { ...ev.effects };
 			for (const k in effects) {
 				if (effects[k] > 0 && (k === "credits" || k === "parts" || k === "munitions")) {
 					effects[k] = Math.floor(effects[k] * 1.25);
 				}
 			}
+		}
+		// Apply focus mode credit cost multiplier
+		const focus_mult = FocusManager.get_event_cost_multiplier(ev.sector);
+		if (focus_mult !== 1.0 && effects.credits && effects.credits < 0) {
+			effects.credits = Math.floor(effects.credits * focus_mult);
 		}
 		GameState.apply_effects(effects);
 		// Special handlers
@@ -2128,10 +2196,10 @@ function refresh_header() {
 	document.getElementById("cycle-display").textContent = `CYCLE ${String(GameState.cycle).padStart(3, "0")}`;
 	document.getElementById("gm-name").textContent = `GUILDMASTER: ${GameState.guildmaster_name}`;
 	const status = document.getElementById("status-line");
-	status.textContent = `MORALE: ${GameState.get_morale_label()} // THREAT: ${GameState.get_threat_label()}`;
+	const morale_class = GameState.morale > 0.7 ? "good" : (GameState.morale > 0.4 ? "warning" : "critical");
+	const threat_class = GameState.threat_level < 0.3 ? "good" : (GameState.threat_level < 0.6 ? "warning" : "critical");
+	status.innerHTML = `MORALE: <span class="status-${morale_class}">${GameState.get_morale_label()}</span> // THREAT: <span class="status-${threat_class}">${GameState.get_threat_label()}</span>`;
 	status.className = "";
-	if (GameState.morale < 0.4 || GameState.threat_level > 0.6) status.classList.add("warning");
-	if (GameState.morale < 0.2 || GameState.threat_level > 0.85) status.classList.add("critical");
 }
 
 function refresh_resources() {
@@ -2185,31 +2253,45 @@ function format_effect_value(key, val) {
 	return `${sign}${val.toLocaleString()} ${label}`;
 }
 
-function format_event_cost(ev) {
-	const parts = [];
-	for (const key in ev.cost) {
-		if (ev.cost[key] < 0) {
-			const val = Math.abs(ev.cost[key]);
-			const labels = { credits: "CR", fuel: "fuel", food: "food",
-				munitions: "munitions", parts: "parts", medicine: "medicine" };
-			parts.push(`${val.toLocaleString()} ${labels[key] || key}`);
-		}
+// Returns { cost: [strings], effect: [strings] }
+// Any negative value in effects+cost is treated as a COST.
+// Any positive value is treated as an EFFECT.
+// Stat changes (morale, threat, etc) are categorized by direction
+// considering whether the change is "good" or "bad" for the player.
+function format_event_split(ev) {
+	const cost = [];
+	const effect = [];
+	// Merge cost and effects so duplicates aren't shown twice
+	const merged = {};
+	for (const k in ev.cost) merged[k] = (merged[k] || 0) + ev.cost[k];
+	for (const k in ev.effects) {
+		// If both cost and effects list the same key with same negative value,
+		// only count once (cost is the canonical "what you pay" entry).
+		if (ev.cost && ev.cost[k] === ev.effects[k]) continue;
+		merged[k] = (merged[k] || 0) + ev.effects[k];
 	}
-	return parts.join(" + ");
+	// Stats where positive = bad (threat, heat, personal threat)
+	const bad_when_positive = new Set(["threat_level", "gm_political_heat", "gm_personal_threat"]);
+	for (const key in merged) {
+		const val = merged[key];
+		if (val === 0) continue;
+		const display = format_effect_value(key, val);
+		const is_bad_direction = (val < 0 && !bad_when_positive.has(key)) || (val > 0 && bad_when_positive.has(key));
+		if (is_bad_direction) cost.push(display.replace(/^[+-]/, "").replace(/^[+-]/, "")); // strip sign for cost display
+		else effect.push(display);
+	}
+	if (ev.special === "tourism_crew") effect.push("0-20 crew, +5 food/c per arrival");
+	if (ev.special === "rationing") effect.push("food consumption -50% next cycle");
+	if (ev.special === "fuel_efficiency") effect.push("permanent fuel consumption reduction");
+	return { cost, effect };
 }
 
+// Legacy wrappers (kept in case something calls these)
+function format_event_cost(ev) {
+	return format_event_split(ev).cost.join(" + ");
+}
 function format_event_reward(ev) {
-	const parts = [];
-	const cost_keys = Object.keys(ev.cost).filter(k => ev.cost[k] < 0);
-	for (const key in ev.effects) {
-		// Skip negative effects that are just paying the cost
-		if (ev.effects[key] < 0 && cost_keys.includes(key)) continue;
-		parts.push(format_effect_value(key, ev.effects[key]));
-	}
-	if (ev.special === "tourism_crew") parts.push("0-20 crew, +5 food/c per arrival");
-	if (ev.special === "rationing") parts.push("food consumption -50% next cycle");
-	if (ev.special === "fuel_efficiency") parts.push("permanent fuel consumption reduction");
-	return parts.join(", ");
+	return format_event_split(ev).effect.join(", ");
 }
 
 function refresh_content() {
@@ -2219,6 +2301,19 @@ function refresh_content() {
 
 	let html = `<h2>${sector.name.toUpperCase()}</h2>`;
 	html += `<p style="color: var(--text-mid); font-size:12px;">STATUS: ${sector.status.toUpperCase()} // CREW: ${sector.crew_assigned} / ${sector.crew_min}</p>`;
+
+	// Focus mode toggle
+	const cur_mode = FocusManager.get_mode(sector_key);
+	html += `<div class="focus-toggle">`;
+	html += `<div class="focus-toggle-label">FOCUS MODE</div>`;
+	html += `<div class="focus-toggle-buttons">`;
+	for (const m of FocusManager.MODES) {
+		const cls = m === cur_mode ? "focus-btn active" : "focus-btn";
+		html += `<button class="${cls}" data-focus-mode="${m}">${FocusManager.MODE_LABELS[m]}</button>`;
+	}
+	html += `</div>`;
+	html += `<div class="focus-toggle-desc">${FocusManager.MODE_DESC[cur_mode]}</div>`;
+	html += `</div>`;
 
 	// Specialist banner
 	if (WorkforceManager.has_active_specialist(sector_key)) {
@@ -2241,11 +2336,12 @@ function refresh_content() {
 		html += render_exploration_extras();
 	}
 
-	html += `<div class="section-title">SUBSECTORS</div>`;
+	html += `<details class="subsectors-toggle"><summary>SUBSECTORS (${Object.keys(sector.subsectors).length})</summary>`;
 	for (const sub_key in sector.subsectors) {
 		const sub = sector.subsectors[sub_key];
 		html += `<div class="subsector-row"><span class="subsector-name">${sub.name}</span><span class="subsector-crew">${sub.crew} crew</span><span class="subsector-status ${sub.status}">${sub.status.toUpperCase()}</span></div>`;
 	}
+	html += `</details>`;
 
 	html += `<div class="section-title">SECTOR EVENTS</div>`;
 	const events = SectorEventManager.get_events_for_sector(sector_key);
@@ -2268,8 +2364,9 @@ function refresh_content() {
 				badge = `<span class="event-badge insufficient">INSUFFICIENT</span>`;
 				disabled = "disabled";
 			}
-			const cost_line = format_event_cost(ev);
-			const reward_line = format_event_reward(ev);
+			const split = format_event_split(ev);
+			const cost_line = split.cost.join(" + ");
+			const reward_line = split.effect.join(", ");
 			html += `<button class="${cls}" data-event="${ev.id}" ${disabled}>
 				<div class="event-header">
 					<span class="event-name">${ev.name}</span>
@@ -2311,7 +2408,7 @@ function refresh_content() {
 }
 
 function render_trade_extras() {
-	let html = `<div class="section-title">MARKET PRICES</div>`;
+	let html = `<details class="dense-toggle"><summary>MARKET PRICES</summary>`;
 	html += `<div class="market-grid">`;
 	for (const key of ["fuel", "food", "munitions", "parts", "medicine"]) {
 		const price = EconomyManager.prices[key];
@@ -2322,7 +2419,7 @@ function render_trade_extras() {
 			<div class="market-price ${trend}">${price} ${arrow}</div>
 		</div>`;
 	}
-	html += `</div>`;
+	html += `</div></details>`;
 
 	html += `<div class="section-title">IMPORTS</div>`;
 	if (EconomyManager.import_offers.length === 0) {
@@ -2347,7 +2444,7 @@ function render_trade_extras() {
 		});
 	}
 
-	html += `<div class="section-title">EXPORTS</div>`;
+	html += `<details class="dense-toggle"><summary>EXPORTS (${EconomyManager.export_offers.length})</summary>`;
 	if (EconomyManager.export_offers.length === 0) {
 		html += `<p style="font-size:11px; color:var(--text-mid);">No exports available.</p>`;
 	} else {
@@ -2361,6 +2458,7 @@ function render_trade_extras() {
 			</div>`;
 		});
 	}
+	html += `</details>`;
 
 	html += `<div class="section-title">TRADE VESSEL</div>`;
 	if (!EconomyManager.trade_vessel) {
@@ -2598,6 +2696,13 @@ function wire_sector_extras() {
 		});
 	});
 
+	content.querySelectorAll("[data-focus-mode]").forEach(btn => {
+		btn.addEventListener("click", () => {
+			FocusManager.set_mode(GameState.active_sector, btn.dataset.focusMode);
+			refresh_all();
+		});
+	});
+
 	const unlock_btn = document.getElementById("unlock-bm-btn");
 	if (unlock_btn) {
 		unlock_btn.addEventListener("click", () => {
@@ -2648,31 +2753,38 @@ function refresh_advance_btn() {
 }
 
 function refresh_threats() {
-	const panel = document.getElementById("threat-panel");
-	if (!panel) return;
-	let html = "<h3>ACTIVE THREATS</h3>";
+	const bar = document.getElementById("threat-bar");
+	if (!bar) return;
 	if (ThreatManager.active_threats.length === 0) {
-		html += '<p style="font-size:11px; color:var(--text-mid);">No active threats.</p>';
-	} else {
-		ThreatManager.active_threats.forEach((threat, i) => {
-			html += `<div class="threat-card">`;
-			html += `<div class="threat-name">${threat.name}</div>`;
-			html += `<div class="threat-desc">${threat.desc}</div>`;
-			threat.responses.forEach((resp, ri) => {
-				const cost_parts = [];
-				for (const key in resp.cost) cost_parts.push(`${resp.cost[key]} ${key}`);
-				const cost_str = cost_parts.length > 0 ? ` (${cost_parts.join(", ")})` : "";
-				let chance_str = "";
-				if (resp.success_chance > 0 && resp.success_chance < 1) {
-					chance_str = ` [${Math.floor(resp.success_chance * 100)}%]`;
-				}
-				html += `<button class="threat-response-btn" data-threat="${i}" data-response="${ri}">${resp.label}${cost_str}${chance_str}</button>`;
-			});
-			html += `</div>`;
-		});
+		bar.innerHTML = "";
+		bar.style.display = "none";
+		return;
 	}
-	panel.innerHTML = html;
-	panel.querySelectorAll(".threat-response-btn").forEach(btn => {
+	bar.style.display = "block";
+	let html = `<div class="threat-bar-header">ACTIVE THREATS — ${ThreatManager.active_threats.length}</div>`;
+	html += `<div class="threat-bar-list">`;
+	ThreatManager.active_threats.forEach((threat, i) => {
+		html += `<div class="threat-card">`;
+		html += `<div class="threat-card-row">`;
+		html += `<div class="threat-name">${threat.name}</div>`;
+		html += `<div class="threat-desc">${threat.desc}</div>`;
+		html += `</div>`;
+		html += `<div class="threat-responses">`;
+		threat.responses.forEach((resp, ri) => {
+			const cost_parts = [];
+			for (const key in resp.cost) cost_parts.push(`${resp.cost[key]} ${key}`);
+			const cost_str = cost_parts.length > 0 ? ` (${cost_parts.join(", ")})` : "";
+			let chance_str = "";
+			if (resp.success_chance > 0 && resp.success_chance < 1) {
+				chance_str = ` [${Math.floor(resp.success_chance * 100)}%]`;
+			}
+			html += `<button class="threat-response-btn" data-threat="${i}" data-response="${ri}">${resp.label}${cost_str}${chance_str}</button>`;
+		});
+		html += `</div></div>`;
+	});
+	html += `</div>`;
+	bar.innerHTML = html;
+	bar.querySelectorAll(".threat-response-btn").forEach(btn => {
 		btn.addEventListener("click", () => {
 			ThreatManager.respond(parseInt(btn.dataset.threat), parseInt(btn.dataset.response));
 			refresh_all();
@@ -2884,6 +2996,7 @@ const SaveManager = {
 					tourism_crew: GameState.tourism_crew,
 					rationing_cycles: GameState.rationing_cycles,
 					active_sector: GameState.active_sector,
+					sector_focus: GameState.sector_focus,
 					event_log: GameState.event_log,
 				},
 				workforce: {
