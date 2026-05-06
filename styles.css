@@ -325,8 +325,8 @@ body {
 #app {
 	display: grid;
 	grid-template-columns: 1fr;
-	grid-template-rows: auto auto auto 1fr auto;
-	grid-template-areas: "header" "resources" "nav" "content" "right";
+	grid-template-rows: auto auto auto auto 1fr auto;
+	grid-template-areas: "header" "threat" "resources" "nav" "content" "right";
 	min-height: 100vh;
 	gap: 1px;
 }
@@ -350,6 +350,9 @@ body {
 #status-line { color: var(--accent-green); }
 #status-line.warning { color: var(--accent-amber); }
 #status-line.critical { color: var(--accent-rust); }
+.status-good { color: var(--accent-green); }
+.status-warning { color: var(--accent-amber); }
+.status-critical { color: var(--accent-rust); }
 
 #resource-bar {
 	grid-area: resources;
@@ -359,6 +362,142 @@ body {
 	grid-template-columns: repeat(7, 1fr);
 	gap: 1px;
 	padding: 1px;
+}
+
+@media (max-width: 600px) {
+	#resource-bar {
+		grid-template-columns: repeat(4, 1fr);
+	}
+}
+
+/* THREAT BAR (above resources) */
+#threat-bar {
+	grid-area: threat;
+	background: var(--bg-panel);
+	border-bottom: 1px solid var(--accent-rust);
+	padding: 8px 12px;
+	display: none;
+}
+
+.threat-bar-header {
+	color: var(--accent-rust);
+	font-size: 11px; letter-spacing: 2px;
+	margin-bottom: 6px;
+	font-weight: bold;
+}
+
+.threat-bar-list {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.threat-bar-list .threat-card {
+	background: var(--bg-card);
+	border: 1px solid var(--accent-rust);
+	padding: 8px;
+	margin: 0;
+}
+
+.threat-bar-list .threat-card-row {
+	display: flex; flex-direction: column;
+	margin-bottom: 6px;
+}
+
+.threat-bar-list .threat-name {
+	color: var(--accent-rust);
+	font-size: 12px; letter-spacing: 1px;
+}
+
+.threat-bar-list .threat-desc {
+	color: var(--text-mid);
+	font-size: 11px;
+	margin-top: 2px;
+}
+
+.threat-responses {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+
+.threat-responses .threat-response-btn {
+	flex: 1;
+	min-width: 120px;
+}
+
+/* FOCUS TOGGLE */
+.focus-toggle {
+	background: var(--bg-card);
+	border: 1px solid var(--border-mid);
+	padding: 10px;
+	margin: 12px 0;
+}
+
+.focus-toggle-label {
+	font-size: 10px;
+	color: var(--text-dim);
+	letter-spacing: 2px;
+	margin-bottom: 6px;
+}
+
+.focus-toggle-buttons {
+	display: flex;
+	gap: 4px;
+	margin-bottom: 6px;
+}
+
+.focus-btn {
+	flex: 1;
+	background: var(--bg-panel);
+	color: var(--text-mid);
+	border: 1px solid var(--border-dim);
+	padding: 8px 4px;
+	font-family: inherit;
+	font-size: 10px; letter-spacing: 1px;
+	cursor: pointer;
+	min-height: 36px;
+}
+
+.focus-btn:hover, .focus-btn:active {
+	background: var(--bg-hover);
+	border-color: var(--border-bright);
+	color: var(--text-bright);
+}
+
+.focus-btn.active {
+	background: var(--bg-hover);
+	border-color: var(--accent-ice);
+	color: var(--accent-ice);
+}
+
+.focus-toggle-desc {
+	font-size: 10px;
+	color: var(--text-dim);
+	font-style: italic;
+}
+
+/* COLLAPSIBLES */
+.subsectors-toggle, .dense-toggle {
+	margin: 12px 0;
+}
+
+.subsectors-toggle summary, .dense-toggle summary {
+	color: var(--text-dim);
+	font-size: 10px; letter-spacing: 2px;
+	cursor: pointer;
+	padding: 6px 0;
+	border-bottom: 1px solid var(--border-dim);
+	margin-bottom: 8px;
+	user-select: none;
+}
+
+.subsectors-toggle summary:hover, .dense-toggle summary:hover {
+	color: var(--text-mid);
+}
+
+.subsectors-toggle[open] summary, .dense-toggle[open] summary {
+	color: var(--text-mid);
 }
 
 .resource-card {
@@ -1113,9 +1252,10 @@ body {
 @media (min-width: 900px) {
 	#app {
 		grid-template-columns: 200px 1fr 280px;
-		grid-template-rows: auto auto 1fr;
+		grid-template-rows: auto auto auto 1fr;
 		grid-template-areas:
 			"header header header"
+			"threat threat threat"
 			"resources resources resources"
 			"nav content right";
 	}
